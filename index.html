@@ -1,0 +1,1174 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Поиск лучших компаний по нише</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f1117;
+      color: #e1e4e8;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
+
+    h1 {
+      text-align: center;
+      font-size: 28px;
+      margin-bottom: 8px;
+      color: #fff;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: #8b949e;
+      margin-bottom: 32px;
+      font-size: 15px;
+    }
+
+    .form-section {
+      max-width: 600px;
+      margin: 0 auto 40px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .input-group label {
+      font-size: 13px;
+      color: #8b949e;
+      font-weight: 500;
+    }
+
+    input[type="text"], input[type="password"] {
+      padding: 12px 16px;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      background: #161b22;
+      color: #e1e4e8;
+      font-size: 15px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input:focus {
+      border-color: #58a6ff;
+    }
+
+    .prompt-preview {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-size: 14px;
+      color: #8b949e;
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+    }
+
+    .prompt-preview .highlight {
+      color: #58a6ff;
+      font-weight: 600;
+    }
+
+    button {
+      padding: 12px 24px;
+      background: #238636;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    button:hover { background: #2ea043; }
+    button:disabled {
+      background: #21262d;
+      color: #484f58;
+      cursor: not-allowed;
+    }
+
+    .results {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+      gap: 20px;
+    }
+
+    .result-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .result-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid #30363d;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .model-badge {
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .badge-chatgpt { background: #10a37f; }
+    .badge-gemini { background: #4285f4; }
+    .badge-claude { background: #d97706; }
+
+    .model-name {
+      font-weight: 600;
+      font-size: 15px;
+    }
+
+    .chat-messages {
+      padding: 0;
+      max-height: 600px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .chat-messages::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .chat-messages::-webkit-scrollbar-thumb {
+      background: #30363d;
+      border-radius: 3px;
+    }
+
+    .chat-msg {
+      padding: 14px 20px;
+      font-size: 14px;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      border-bottom: 1px solid #1c2129;
+    }
+
+    .chat-msg-user {
+      background: #1c2333;
+    }
+
+    .chat-msg-user .chat-msg-label {
+      color: #58a6ff;
+      font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+
+    .chat-msg-assistant .chat-msg-label {
+      color: #8b949e;
+      font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+
+    .error-text { color: #f85149; }
+
+    .chat-input-area {
+      display: flex;
+      gap: 8px;
+      padding: 12px 16px;
+      border-top: 1px solid #30363d;
+      background: #0d1117;
+    }
+
+    .chat-input-area input {
+      flex: 1;
+      padding: 10px 14px;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      background: #161b22;
+      color: #e1e4e8;
+      font-size: 14px;
+      outline: none;
+    }
+
+    .chat-input-area input:focus {
+      border-color: #58a6ff;
+    }
+
+    .chat-input-area button {
+      padding: 10px 16px;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 40px;
+      color: #8b949e;
+    }
+
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid #30363d;
+      border-top-color: #58a6ff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    .spinner-small {
+      width: 14px;
+      height: 14px;
+      border: 2px solid #30363d;
+      border-top-color: #58a6ff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      display: inline-block;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .grok-table-wrap table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    .grok-table-wrap th {
+      background: #1c2333;
+      color: #58a6ff;
+      text-align: left;
+      padding: 10px 14px;
+      border: 1px solid #30363d;
+      font-weight: 600;
+    }
+
+    .grok-table-wrap td {
+      padding: 10px 14px;
+      border: 1px solid #30363d;
+      line-height: 1.5;
+    }
+
+    .grok-table-wrap tr:nth-child(even) {
+      background: #161b22;
+    }
+
+    .grok-table-wrap tr:nth-child(odd) {
+      background: #0d1117;
+    }
+
+    .xml-output {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 20px;
+      font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+      font-size: 13px;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-x: auto;
+      color: #e1e4e8;
+    }
+
+    .xml-output .xml-tag { color: #7ee787; }
+    .xml-output .xml-attr { color: #d2a8ff; }
+    .xml-output .xml-val { color: #a5d6ff; }
+    .xml-output .xml-text { color: #e1e4e8; }
+
+    .copy-btn {
+      padding: 6px 14px;
+      font-size: 12px;
+      background: #21262d;
+      color: #8b949e;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      cursor: pointer;
+      float: right;
+      margin-bottom: 10px;
+    }
+
+    .copy-btn:hover {
+      background: #30363d;
+      color: #e1e4e8;
+    }
+
+    .canvas-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 16px;
+      border-bottom: 1px solid #30363d;
+      background: #0d1117;
+    }
+
+    .canvas-tabs {
+      display: flex;
+      gap: 4px;
+    }
+
+    .canvas-tab {
+      padding: 6px 16px;
+      font-size: 13px;
+      background: transparent;
+      color: #8b949e;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 500;
+    }
+
+    .canvas-tab:hover {
+      color: #e1e4e8;
+      background: #161b22;
+    }
+
+    .canvas-tab.active {
+      background: #238636;
+      color: #fff;
+      border-color: #238636;
+    }
+
+    .canvas-frame {
+      width: 100%;
+      min-height: 800px;
+      border: none;
+      background: #fff;
+      border-radius: 0 0 12px 12px;
+    }
+
+    .canvas-code {
+      background: #0d1117;
+      padding: 20px;
+      font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      color: #e1e4e8;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 800px;
+      overflow-y: auto;
+      margin: 0;
+    }
+
+    .api-key-toggle {
+      font-size: 12px;
+      color: #58a6ff;
+      cursor: pointer;
+      background: none;
+      border: none;
+      padding: 0;
+      font-weight: 400;
+    }
+
+    .api-key-toggle:hover {
+      text-decoration: underline;
+      background: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>30 лучших компаний по нише</h1>
+    <p class="subtitle">Введите нишу — получите списки от трёх нейросетей через OpenRouter</p>
+
+    <div class="form-section">
+      <div class="input-group">
+        <label>
+          API-ключ OpenRouter
+          <button class="api-key-toggle" onclick="toggleApiKey()" id="toggleBtn">показать</button>
+        </label>
+        <input type="password" id="apiKey" placeholder="sk-or-..." />
+      </div>
+
+      <div class="input-group">
+        <label>Название ниши</label>
+        <input type="text" id="niche" placeholder="например: кибербезопасность" oninput="updatePreview()" />
+      </div>
+
+      <div class="prompt-preview" id="preview">
+        Составь список 30 лучших компаний <span class="highlight">...</span>
+      </div>
+
+      <button id="searchBtn" onclick="search()">Найти компании</button>
+    </div>
+
+    <div class="results" id="results"></div>
+
+    <div id="grok-section" style="display:none; margin-top: 40px;">
+      <h2 style="text-align:center; font-size:22px; margin-bottom:16px; color:#fff;">Итоговый анализ — Grok Deep Research</h2>
+      <div class="result-card" id="grok-card">
+        <div class="result-header">
+          <span class="model-badge" style="background:#ef4444;">Grok</span>
+          <span class="model-name">Grok Deep Research</span>
+        </div>
+        <div class="chat-messages" id="grok-messages"></div>
+      </div>
+    </div>
+
+    <div id="audience-section" style="display:none; margin-top: 40px;">
+      <h2 style="text-align:center; font-size:22px; margin-bottom:16px; color:#fff;">Аудитории и боли — Grok</h2>
+      <div class="result-card" id="audience-card">
+        <div class="result-header">
+          <span class="model-badge" style="background:#ef4444;">Grok</span>
+          <span class="model-name">Аудитории и боли ЦА</span>
+        </div>
+        <div class="chat-messages" id="audience-messages"></div>
+      </div>
+    </div>
+
+    <div id="compiler-section" style="display:none; margin-top: 40px;">
+      <h2 style="text-align:center; font-size:22px; margin-bottom:16px; color:#fff;">Компилятор критериев — Claude</h2>
+      <div class="result-card" id="compiler-card">
+        <div class="result-header">
+          <span class="model-badge badge-claude">Claude</span>
+          <span class="model-name">XML-структура критериев</span>
+        </div>
+        <div class="chat-messages" id="compiler-messages" style="max-height:none;"></div>
+      </div>
+    </div>
+
+    <div id="canvas-section" style="display:none; margin-top: 40px;">
+      <h2 style="text-align:center; font-size:22px; margin-bottom:16px; color:#fff;">Генератор сайта — Claude</h2>
+      <div class="result-card" id="canvas-card">
+        <div class="result-header">
+          <span class="model-badge badge-claude">Claude</span>
+          <span class="model-name">Готовый сайт (HTML)</span>
+        </div>
+        <div class="canvas-toolbar" id="canvas-toolbar" style="display:none;">
+          <div class="canvas-tabs">
+            <button class="canvas-tab active" onclick="switchCanvasTab('preview')">Превью</button>
+            <button class="canvas-tab" onclick="switchCanvasTab('code')">Код</button>
+          </div>
+          <button class="copy-btn" onclick="navigator.clipboard.writeText(canvasRawHtml).then(()=>{this.textContent='Скопировано!';setTimeout(()=>this.textContent='Копировать HTML',1500)})">Копировать HTML</button>
+        </div>
+        <div id="canvas-loading" class="loading" style="display:none;"><div class="spinner"></div>Claude генерирует сайт...</div>
+        <div id="canvas-preview" style="display:none;">
+          <iframe id="canvas-iframe" class="canvas-frame" sandbox="allow-scripts allow-same-origin"></iframe>
+        </div>
+        <div id="canvas-code-view" style="display:none;">
+          <pre class="canvas-code"><code id="canvas-code-content"></code></pre>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const MODELS = [
+      { id: "openai/gpt-4o", name: "ChatGPT (GPT-4o)" },
+      { id: "google/gemini-2.0-flash-001", name: "Gemini 2.0 Flash" },
+      { id: "anthropic/claude-sonnet-4", name: "Claude (Sonnet 4)" },
+    ];
+
+    // Conversation history per model: { [modelId]: [{role, content}] }
+    const conversations = {};
+
+    // Direct OpenRouter call (no backend needed)
+    async function callModel(modelId, messages, apiKey) {
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({ model: modelId, messages }),
+      });
+
+      if (!response.ok) {
+        const err = await response.text();
+        return { error: `Ошибка API: ${response.status} — ${err}` };
+      }
+
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content || "Пустой ответ";
+      return { content };
+    }
+
+    function mdTableToHtml(text) {
+      const lines = text.split("\n").map(l => l.trim()).filter(l => l.startsWith("|"));
+      if (lines.length < 2) return null;
+
+      const parseRow = line => line.split("|").slice(1, -1).map(c => c.trim());
+
+      const headers = parseRow(lines[0]);
+      // skip separator line (line with ---)
+      const startIdx = lines[1].includes("---") ? 2 : 1;
+      const rows = lines.slice(startIdx).map(parseRow);
+
+      let html = "<table><thead><tr>";
+      for (const h of headers) html += `<th>${h}</th>`;
+      html += "</tr></thead><tbody>";
+      for (const row of rows) {
+        html += "<tr>";
+        for (const cell of row) html += `<td>${cell}</td>`;
+        html += "</tr>";
+      }
+      html += "</tbody></table>";
+      return html;
+    }
+
+    // Parse audience response: always produce 2-column table + portraits block
+    function parseAudienceResponse(text) {
+      const lines = text.split("\n").map(l => l.trim()).filter(l => l.startsWith("|"));
+      if (lines.length < 3) return null;
+
+      const parseRow = line => line.split("|").slice(1, -1).map(c => c.trim());
+      const headers = parseRow(lines[0]);
+      const startIdx = lines[1].includes("---") ? 2 : 1;
+      const dataRows = lines.slice(startIdx).map(parseRow);
+
+      const colCount = headers.length;
+
+      // Determine which columns are ЦА and Боль/Интент
+      // If 3+ columns: first = ЦА, last = Боль, middle = Портрет
+      const caIdx = 0;
+      const painIdx = colCount - 1;
+      const portraitIdx = colCount >= 3 ? 1 : -1;
+
+      // Build 2-column table
+      let tableHtml = `<table><thead><tr><th>ЦА</th><th>Боль / Интент</th></tr></thead><tbody>`;
+      const portraits = {};
+
+      for (const row of dataRows) {
+        const ca = row[caIdx] || "";
+        const pain = row[painIdx] || "";
+        tableHtml += `<tr><td>${ca}</td><td>${pain}</td></tr>`;
+
+        // Collect unique portraits
+        if (portraitIdx >= 0 && row[portraitIdx] && ca && !portraits[ca]) {
+          portraits[ca] = row[portraitIdx];
+        }
+      }
+      tableHtml += "</tbody></table>";
+
+      // Build portraits HTML
+      let portraitsHtml = "";
+      const entries = Object.entries(portraits);
+      if (entries.length > 0) {
+        portraitsHtml = `<div style="margin-top:20px; padding-top:16px; border-top:1px solid #30363d;">
+          <div style="font-size:12px; color:#58a6ff; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:12px;">Портреты ЦА</div>`;
+        for (const [name, desc] of entries) {
+          portraitsHtml += `<div style="margin-bottom:8px; font-size:14px; line-height:1.6;"><span style="color:#e1e4e8; font-weight:600;">${name}:</span> <span style="color:#8b949e;">${desc}</span></div>`;
+        }
+        portraitsHtml += "</div>";
+      }
+
+      return { tableHtml, portraitsHtml };
+    }
+
+    // XML syntax highlighter
+    function highlightXml(text) {
+      // Strip markdown code fences if present
+      text = text.replace(/^```xml\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+      return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/&lt;(\/?[\w_]+)(.*?)&gt;/g, (match, tag, rest) => {
+          // Highlight attributes inside tags
+          const highlighted = rest.replace(/([\w_]+)=(&quot;|")(.*?)(&quot;|")/g,
+            '<span class="xml-attr">$1</span>=<span class="xml-val">"$3"</span>');
+          return `<span class="xml-tag">&lt;${tag}${highlighted}&gt;</span>`;
+        });
+    }
+
+    let compilerRawXml = ""; // Store for copy button
+    let canvasRawHtml = ""; // Store for copy button
+
+    function switchCanvasTab(tab) {
+      const previewEl = document.getElementById('canvas-preview');
+      const codeEl = document.getElementById('canvas-code-view');
+      const tabs = document.querySelectorAll('.canvas-tab');
+      tabs.forEach(t => t.classList.remove('active'));
+      if (tab === 'preview') {
+        previewEl.style.display = 'block';
+        codeEl.style.display = 'none';
+        tabs[0].classList.add('active');
+      } else {
+        previewEl.style.display = 'none';
+        codeEl.style.display = 'block';
+        tabs[1].classList.add('active');
+      }
+    }
+
+    function updatePreview() {
+      const niche = document.getElementById("niche").value.trim();
+      document.getElementById("preview").innerHTML =
+        `Составь список 30 лучших компаний <span class="highlight">${niche || "..."}</span>`;
+    }
+
+    function toggleApiKey() {
+      const input = document.getElementById("apiKey");
+      const btn = document.getElementById("toggleBtn");
+      if (input.type === "password") {
+        input.type = "text";
+        btn.textContent = "скрыть";
+      } else {
+        input.type = "password";
+        btn.textContent = "показать";
+      }
+    }
+
+    function getBadgeClass(modelId) {
+      if (modelId.includes("openai")) return "badge-chatgpt";
+      if (modelId.includes("google")) return "badge-gemini";
+      if (modelId.includes("anthropic")) return "badge-claude";
+      return "";
+    }
+
+    function getBadgeLabel(modelId) {
+      if (modelId.includes("openai")) return "ChatGPT";
+      if (modelId.includes("google")) return "Gemini";
+      if (modelId.includes("anthropic")) return "Claude";
+      return "AI";
+    }
+
+    function renderCard(modelId) {
+      const model = MODELS.find(m => m.id === modelId);
+      const card = document.getElementById(`card-${CSS.escape(modelId)}`);
+      if (!card || !model) return;
+
+      const msgs = conversations[modelId] || [];
+      const badgeClass = getBadgeClass(modelId);
+      const badgeLabel = getBadgeLabel(modelId);
+
+      let messagesHtml = "";
+      for (const msg of msgs) {
+        const isUser = msg.role === "user";
+        messagesHtml += `
+          <div class="chat-msg ${isUser ? "chat-msg-user" : "chat-msg-assistant"}">
+            <div class="chat-msg-label">${isUser ? "Вы" : badgeLabel}</div>
+            <div>${msg.content}</div>
+          </div>`;
+      }
+
+      card.innerHTML = `
+        <div class="result-header">
+          <span class="model-badge ${badgeClass}">${badgeLabel}</span>
+          <span class="model-name">${model.name}</span>
+        </div>
+        <div class="chat-messages" id="msgs-${CSS.escape(modelId)}">${messagesHtml}</div>
+        <div class="chat-input-area">
+          <input type="text" id="input-${CSS.escape(modelId)}" placeholder="Задать вопрос..." onkeydown="if(event.key==='Enter')sendFollowUp('${modelId}')" />
+          <button onclick="sendFollowUp('${modelId}')">Отправить</button>
+        </div>`;
+
+      // Scroll chat to bottom
+      const msgsEl = document.getElementById(`msgs-${CSS.escape(modelId)}`);
+      if (msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
+    }
+
+    async function sendFollowUp(modelId) {
+      const apiKey = document.getElementById("apiKey").value.trim();
+      const inputEl = document.getElementById(`input-${CSS.escape(modelId)}`);
+      const question = inputEl.value.trim();
+      if (!question || !apiKey) return;
+
+      // Add user message
+      conversations[modelId].push({ role: "user", content: question });
+      inputEl.value = "";
+      renderCard(modelId);
+
+      // Show loading
+      const msgsEl = document.getElementById(`msgs-${CSS.escape(modelId)}`);
+      const loadingDiv = document.createElement("div");
+      loadingDiv.className = "chat-msg chat-msg-assistant";
+      loadingDiv.innerHTML = `<div class="chat-msg-label">${getBadgeLabel(modelId)}</div><div><span class="spinner-small"></span> Думает...</div>`;
+      msgsEl.appendChild(loadingDiv);
+      msgsEl.scrollTop = msgsEl.scrollHeight;
+
+      // Disable input
+      const btnEl = inputEl.nextElementSibling;
+      inputEl.disabled = true;
+      btnEl.disabled = true;
+
+      try {
+        const data = await callModel(modelId, conversations[modelId], apiKey);
+
+        if (data.error) {
+          conversations[modelId].push({ role: "assistant", content: `[Ошибка] ${data.error}` });
+        } else {
+          conversations[modelId].push({ role: "assistant", content: data.content });
+        }
+      } catch (err) {
+        conversations[modelId].push({ role: "assistant", content: `[Ошибка] ${err.message}` });
+      }
+
+      inputEl.disabled = false;
+      btnEl.disabled = false;
+      renderCard(modelId);
+    }
+
+    async function search() {
+      const apiKey = document.getElementById("apiKey").value.trim();
+      const niche = document.getElementById("niche").value.trim();
+      const btn = document.getElementById("searchBtn");
+      const resultsDiv = document.getElementById("results");
+
+      if (!apiKey) return alert("Введите API-ключ OpenRouter");
+      if (!niche) return alert("Введите название ниши");
+
+      localStorage.setItem("openrouter_key", apiKey);
+
+      btn.disabled = true;
+      btn.textContent = "Загрузка...";
+
+      const prompt1 = `Составь список 30 лучших компаний ${niche}`;
+      const prompt2 = `Почему именно эти сервисы были поставлены в ТОП. 1. Составь список критериев, по которым ты оценивал сайты 2. Разгруппируй эти критерии на смысловые группы 3. Отранжируй эти критерии в порядке уменьшения веса влияния на место в рейтинге`;
+
+      // Reset conversations
+      for (const model of MODELS) {
+        conversations[model.id] = [{ role: "user", content: prompt1 }];
+      }
+
+      // Create card shells with loading
+      resultsDiv.innerHTML = MODELS.map(m => {
+        const badgeClass = getBadgeClass(m.id);
+        const badgeLabel = getBadgeLabel(m.id);
+        return `
+          <div class="result-card" id="card-${CSS.escape(m.id)}">
+            <div class="result-header">
+              <span class="model-badge ${badgeClass}">${badgeLabel}</span>
+              <span class="model-name">${m.name}</span>
+            </div>
+            <div class="loading"><div class="spinner"></div>${badgeLabel} думает... (запрос 1/2)</div>
+          </div>`;
+      }).join("");
+
+      // Fetch all models in parallel: prompt1 → prompt2
+      const promises = MODELS.map(async (model) => {
+        // --- Запрос 1 ---
+        try {
+          const data1 = await callModel(model.id, conversations[model.id], apiKey);
+          if (data1.error) {
+            conversations[model.id].push({ role: "assistant", content: `[Ошибка] ${data1.error}` });
+            renderCard(model.id);
+            return;
+          }
+          conversations[model.id].push({ role: "assistant", content: data1.content });
+        } catch (err) {
+          conversations[model.id].push({ role: "assistant", content: `[Ошибка] ${err.message}` });
+          renderCard(model.id);
+          return;
+        }
+
+        // Показать первый ответ + лоадер второго
+        renderCard(model.id);
+        const msgsEl = document.getElementById(`msgs-${CSS.escape(model.id)}`);
+        if (msgsEl) {
+          const loadingDiv = document.createElement("div");
+          loadingDiv.className = "chat-msg chat-msg-user";
+          loadingDiv.innerHTML = `<div class="chat-msg-label">Вы (авто)</div><div style="color:#8b949e"><span class="spinner-small"></span> Отправляю запрос 2/2...</div>`;
+          msgsEl.appendChild(loadingDiv);
+          msgsEl.scrollTop = msgsEl.scrollHeight;
+        }
+
+        // --- Запрос 2 (с контекстом) ---
+        conversations[model.id].push({ role: "user", content: prompt2 });
+
+        try {
+          const data2 = await callModel(model.id, conversations[model.id], apiKey);
+          if (data2.error) {
+            conversations[model.id].push({ role: "assistant", content: `[Ошибка] ${data2.error}` });
+          } else {
+            conversations[model.id].push({ role: "assistant", content: data2.content });
+          }
+        } catch (err) {
+          conversations[model.id].push({ role: "assistant", content: `[Ошибка] ${err.message}` });
+        }
+
+        renderCard(model.id);
+      });
+
+      await Promise.all(promises);
+
+      let grokCriteriaRaw = "";
+      let grokAudienceRaw = "";
+
+      // --- Запрос 3: Grok Deep Research ---
+      btn.textContent = "Анализ критериев (Grok)...";
+
+      // Собрать последний ответ (критерии) от каждой модели
+      const criteriaBlocks = MODELS.map(m => {
+        const msgs = conversations[m.id] || [];
+        const lastAssistant = [...msgs].reverse().find(msg => msg.role === "assistant");
+        return `=== ${m.name} ===\n${lastAssistant?.content || "(нет ответа)"}`;
+      }).join("\n\n");
+
+      const grokPrompt = `Представь, что ты человек, который провел ресерч данной ниши и тебе необходимо составить собственный рейтинг, который будет оценивать каждую компанию по определенным критериям.
+
+Тебе необходимо выполнить смысловую дедупликацию критериев
+Составить итоговую таблицу с критериями (В первом столбце критерий, а во втором столбце методология его оценки)
+При разборе запрещается пропускать критерии
+
+ВАЖНО: В ответе выведи ТОЛЬКО итоговую таблицу. Без вступления, без пояснений, без заключения. Только таблица.
+
+Список критериев ниже:
+<data>
+${criteriaBlocks}
+</data>`;
+
+      const grokSection = document.getElementById("grok-section");
+      const grokMessages = document.getElementById("grok-messages");
+      grokSection.style.display = "block";
+      grokMessages.innerHTML = `<div class="loading"><div class="spinner"></div>Grok Deep Research анализирует критерии...</div>`;
+      grokSection.scrollIntoView({ behavior: "smooth" });
+
+      try {
+        const grokData = await callModel("x-ai/grok-3-mini-beta", [{ role: "user", content: grokPrompt }], apiKey);
+        if (grokData.error) {
+          grokMessages.innerHTML = `<div class="chat-msg chat-msg-assistant"><div class="chat-msg-label">Grok</div><div class="error-text">[Ошибка] ${grokData.error}</div></div>`;
+        } else {
+          grokCriteriaRaw = grokData.content;
+          const tableHtml = mdTableToHtml(grokData.content);
+          const rendered = tableHtml
+            ? `<div class="grok-table-wrap">${tableHtml}</div>`
+            : `<div style="white-space:pre-wrap">${grokData.content}</div>`;
+          grokMessages.innerHTML = `
+            <div class="chat-msg chat-msg-assistant" style="padding:20px;">
+              ${rendered}
+            </div>`;
+        }
+      } catch (err) {
+        grokMessages.innerHTML = `<div class="chat-msg chat-msg-assistant"><div class="chat-msg-label">Grok</div><div class="error-text">[Ошибка] ${err.message}</div></div>`;
+      }
+
+      // --- Запрос 4: Аудитории и боли ---
+      btn.textContent = "Анализ аудиторий (Grok)...";
+
+      const audiencePrompt = `Ты — маркетолог-аналитик и UX-специалист. Тебе дана ниша: "${niche}".
+
+Смоделируй 4 сегмента целевой аудитории для компаний в этой нише.
+
+Для каждого сегмента ЦА составь подробный список их болей, вопросов и интентов (не менее 15–20 пунктов).
+
+Ответ выведи в два блока:
+
+БЛОК 1 — markdown-таблица с двумя столбцами. Каждая боль/интент — ОТДЕЛЬНАЯ строка.
+
+| ЦА | Боль / Интент |
+|---|---|
+| Малый бизнес | Хочу понять стоимость до покупки |
+| Малый бизнес | Боюсь сложной интеграции |
+| Корпорации | Нужна масштабируемость |
+
+БЛОК 2 — после таблицы, через разделитель "---", выведи краткие портреты каждой ЦА в формате:
+
+---
+**Малый бизнес:** Владелец компании до 50 чел., ищет автоматизацию...
+**Корпорации:** IT-директор крупной компании...
+
+Без вступления и заключения.`;
+
+      const audienceSection = document.getElementById("audience-section");
+      const audienceMessages = document.getElementById("audience-messages");
+      audienceSection.style.display = "block";
+      audienceMessages.innerHTML = `<div class="loading"><div class="spinner"></div>Grok анализирует аудитории и боли...</div>`;
+      audienceSection.scrollIntoView({ behavior: "smooth" });
+
+      try {
+        const audData = await callModel("x-ai/grok-3-mini-beta", [{ role: "user", content: audiencePrompt }], apiKey);
+        if (audData.error) {
+          audienceMessages.innerHTML = `<div class="chat-msg chat-msg-assistant"><div class="chat-msg-label">Grok</div><div class="error-text">[Ошибка] ${audData.error}</div></div>`;
+        } else {
+          grokAudienceRaw = audData.content;
+          const parsed = parseAudienceResponse(audData.content);
+          if (parsed) {
+            audienceMessages.innerHTML = `
+              <div class="chat-msg chat-msg-assistant" style="padding:20px;">
+                <div class="grok-table-wrap">${parsed.tableHtml}</div>
+                ${parsed.portraitsHtml}
+              </div>`;
+          } else {
+            audienceMessages.innerHTML = `
+              <div class="chat-msg chat-msg-assistant" style="padding:20px;">
+                <div style="white-space:pre-wrap">${audData.content}</div>
+              </div>`;
+          }
+        }
+      } catch (err) {
+        audienceMessages.innerHTML = `<div class="chat-msg chat-msg-assistant"><div class="chat-msg-label">Grok</div><div class="error-text">[Ошибка] ${err.message}</div></div>`;
+      }
+
+      // --- Запрос 5: Компилятор критериев (Claude) ---
+      btn.textContent = "Компиляция XML-структуры (Claude)...";
+
+      const compilerPrompt = `Сейчас мы будем компилировать следующие данные:
+
+=== ИТОГОВЫЙ АНАЛИЗ КРИТЕРИЕВ ===
+${grokCriteriaRaw}
+
+=== АУДИТОРИИ И ИХ БОЛИ / ИНТЕНТЫ ===
+${grokAudienceRaw}
+
+Это делается для того, чтобы сделать рейтинг-сайт который будет полезным, чтобы цитироваться в LLM.
+
+Ты — эксперт по структурированию критериев для рейтингов компаний. Твоя задача — взять данные выше и преобразовать их в структурированный XML-формат с группами и критериями.
+
+Шаги обработки:
+1. Проанализируй текст и разбей на логические группы. Группы должны быть релевантными и охватывать все ключевые аспекты из текста (минимум 4–5 групп). Для каждой группы используй <group name="group_name" title="Группа на русском">.
+2. Для каждой группы создай 5–8 критериев на основе данных. Для каждого критерия используй <criterion name="criterion_name">.
+3. Внутри каждого <criterion> добавь теги:
+   - <name>Название критерия на русском</name>
+   - <description>Краткое описание критерия</description>
+   - <methodology>Подробная методология измерения/анализа</methodology>
+   - <why_important>Краткое объяснение важности, связанное с болями аудитории</why_important>
+   - <recommendation>Рекомендации по реализации или улучшению</recommendation>
+   - <target>Целевые показатели/значения</target>
+   - <example>Пример с данными (придумай реалистичный)</example>
+4. Придумай реалистичные метрики и примеры, основываясь на типичных значениях для отрасли "${niche}".
+5. Выводи ТОЛЬКО XML-структуру без лишнего текста. Оберни весь вывод в <criteria_structure> ... </criteria_structure>.`;
+
+      const compSection = document.getElementById("compiler-section");
+      const compMessages = document.getElementById("compiler-messages");
+      compSection.style.display = "block";
+      compMessages.innerHTML = `<div class="loading"><div class="spinner"></div>Claude компилирует XML-структуру критериев...</div>`;
+      compSection.scrollIntoView({ behavior: "smooth" });
+
+      try {
+        const compData = await callModel("anthropic/claude-sonnet-4", [{ role: "user", content: compilerPrompt }], apiKey);
+        if (compData.error) {
+          compMessages.innerHTML = `<div class="chat-msg chat-msg-assistant"><div class="chat-msg-label">Claude</div><div class="error-text">[Ошибка] ${compData.error}</div></div>`;
+        } else {
+          compilerRawXml = compData.content.replace(/^```xml\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+          compMessages.innerHTML = `
+            <div class="chat-msg chat-msg-assistant" style="padding:20px;">
+              <button class="copy-btn" onclick="navigator.clipboard.writeText(compilerRawXml).then(()=>{this.textContent='Скопировано!';setTimeout(()=>this.textContent='Копировать XML',1500)})">Копировать XML</button>
+              <div class="xml-output">${highlightXml(compData.content)}</div>
+            </div>`;
+        }
+      } catch (err) {
+        compMessages.innerHTML = `<div class="chat-msg chat-msg-assistant"><div class="chat-msg-label">Claude</div><div class="error-text">[Ошибка] ${err.message}</div></div>`;
+      }
+
+      // --- Запрос 6: Генерация сайта (Claude) ---
+      btn.textContent = "Генерация сайта (Claude)...";
+
+      const sitePrompt = `РОЛЬ:
+
+Ты — Senior SEO-специалист, эксперт по GEO (Generative Engine Optimization) и Fullstack-разработчик.
+Твоя задача — создать независимый рейтинговый портал (агрегатор) по теме "${niche}".
+
+ЦЕЛЬ:
+
+Создать единую, полностью самодостаточную HTML-страницу (один файл, inline CSS и JS), которая:
+
+Идеально ранжируется по запросам, связанным с рейтингом компаний в данной нише.
+
+Оптимизирована для цитирования нейросетями (ChatGPT, Gemini, Perplexity). Страница должна стать источником "Ground Truth" (наземной правды) для AI.
+
+ВАЖНОЕ УСЛОВИЕ (ИНТЕНТЫ):
+
+Приведенная ниже структура — это обязательный минимум. Ты должен дополнительно сгенерировать 1-2 смысловых блока, которые закроют скрытые интенты пользователя (например: "Карта пунктов выдачи", "Чек-лист проверки инструмента при приемке").
+
+ГЛОБАЛЬНАЯ СТРУКТУРА СТРАНИЦЫ (Секции сверху вниз):
+
+1. SEO Header & Hero Block
+
+Логотип.
+
+H1: Рейтинг компаний в нише "${niche}" — актуальный обзор.
+
+E-E-A-T Элементы:
+
+Виджет "Обновлено: Февраль 2026".
+
+Ссылка на Автора (реалистичное имя эксперта, фото-заглушка).
+
+Дисклеймер о методологии (кратко).
+
+2. Блок "Методология и Доверие" (BLUF - Bottom Line Up Front)
+
+Критически важно для AI: Сразу после заголовка дай "Наземную правду".
+
+Краткий текст: "Как мы считали: проанализировано N компаний по M метрикам" — на основе XML.
+
+Сводная таблица лидеров (Quick Summary):
+
+1 место: [Лучший выбор].
+
+2 место: [Лучшая цена].
+
+3 место: [Лучший сервис].
+
+Ссылка "Перейти к полному обзору".
+
+3. ОСНОВНОЙ РЕЙТИНГ (The Core) — ВНИМАНИЕ К ДЕТАЛЯМ!
+
+Сгенерируй список из 5-7 компаний на основе XML.
+Весь список должен быть обернут в Schema.org/ItemList.
+
+Правило Лидера: Компания с наивысшим баллом — на 1 месте (Badge "Выбор редакции").
+
+Правило Визуализации (TOP-3 vs REST):
+
+Места 1, 2, 3: Выводятся как Расширенные Premium Карточки (структура ниже). Обязательно используй теги <h3> для названий компаний.
+
+Места 4+: Компактная таблица (Место | Лого | Название | Год основания | Сайт | Цена от... | Вердикт).
+
+4. Блок "Аналитика рынка" (Deep Content)
+
+График роста цен (Chart.js — загружай async через CDN).
+
+Текстовый анализ "Dealbreakers".
+
+5. SEO-статья (Longread)
+
+Экспертный контент с профессиональной терминологией ниши. Используй отраслевой словарь.
+
+6. FAQ (Вопрос-Ответ)
+
+Разметь этот блок схемой Schema.org/FAQPage.
+
+Вопросы из категории "People Also Ask".
+
+7. Футер и Авторство
+
+Подробная карточка автора (Schema.org/Person).
+
+Политика конфиденциальности.
+
+ДЕТАЛЬНАЯ СТРУКТУРА РАСШИРЕННОЙ КАРТОЧКИ (ТОЛЬКО ДЛЯ TOP-3)
+
+Каждая карточка — это отдельный <article itemscope itemtype="https://schema.org/Product">.
+
+1. Header Карточки
+
+<h3>Название компании</h3> + Бейдж "Верифицировано".
+
+Мета: Локация, Год основания, Парк техники.
+
+CTA Кнопка: "Перейти на сайт" (с атрибутом rel="nofollow").
+
+2. Score & AI Summary (Ground Truth)
+
+Общий балл (X.X/10).
+
+AI Summary: Факты, а не вода. Конкретные цифры.
+
+3. Блок "Dealbreakers" (Для AI-Refinements)
+
+✅ Лучше всего подходит для: (конкретные сегменты ЦА).
+
+❌ Может не подойти, если: (конкретные ограничения).
+
+4. Сетка Метрик
+
+Прогресс-бар для каждой метрики из XML.
+
+Теги преимуществ.
+
+Цены и Условия.
+
+5. Кейс и Отзыв
+
+Кейс: Проблема -> Решение -> Результат.
+
+Отзыв: Цитата с разметкой Schema.org/Review.
+
+ТЕХНИЧЕСКИЕ ТРЕБОВАНИЯ (AI CITATION OPTIMIZATION):
+
+1. Микроразметка (Schema.org) — ОБЯЗАТЕЛЬНО
+
+Внедри JSON-LD для: ItemList, Organization (для каждой компании: name, url, aggregateRating), FAQPage, Person, Article.
+
+2. Структура и Код (Mobile-First)
+
+Используй семантические теги: <main>, <article>, <section>, <aside>, <time>.
+
+Core Web Vitals: Код должен быть легким. Используй Tailwind CSS (CDN). Chart.js (CDN async).
+
+Шрифты: Inter (Google Fonts CDN).
+
+3. Контент (E-E-A-T)
+
+Факты: Используй цифры, проценты, конкретные сроки. Избегай прилагательных "лучший", "качественный" без доказательств.
+
+Словарь: Используй профессиональную терминологию ниши.
+
+4. ВЕСЬ КОД В ОДНОМ HTML-ФАЙЛЕ. Inline styles и scripts допустимы.
+
+5. Выведи ТОЛЬКО HTML-код. Без пояснений, без markdown, без тройных бэктиков. Просто чистый HTML начиная с <!DOCTYPE html>.
+
+ВХОДНЫЕ ДАННЫЕ (XML):
+
+${compilerRawXml}`;
+
+      const canvasSection = document.getElementById("canvas-section");
+      const canvasLoading = document.getElementById("canvas-loading");
+      const canvasToolbar = document.getElementById("canvas-toolbar");
+      const canvasPreview = document.getElementById("canvas-preview");
+      const canvasCodeView = document.getElementById("canvas-code-view");
+
+      canvasSection.style.display = "block";
+      canvasLoading.style.display = "flex";
+      canvasToolbar.style.display = "none";
+      canvasPreview.style.display = "none";
+      canvasCodeView.style.display = "none";
+      canvasSection.scrollIntoView({ behavior: "smooth" });
+
+      try {
+        const siteData = await callModel("anthropic/claude-sonnet-4", [{ role: "user", content: sitePrompt }], apiKey);
+
+        if (siteData.error) {
+          canvasLoading.innerHTML = `<div class="error-text" style="padding:20px;">[Ошибка] ${siteData.error}</div>`;
+        } else {
+          // Extract HTML from response (strip markdown fences if present)
+          let html = siteData.content;
+          html = html.replace(/^```html?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+
+          canvasRawHtml = html;
+
+          // Hide loading, show toolbar + preview
+          canvasLoading.style.display = "none";
+          canvasToolbar.style.display = "flex";
+          canvasPreview.style.display = "block";
+
+          // Render in iframe
+          const iframe = document.getElementById("canvas-iframe");
+          iframe.srcdoc = html;
+
+          // Set code view
+          const codeContent = document.getElementById("canvas-code-content");
+          codeContent.textContent = html;
+        }
+      } catch (err) {
+        canvasLoading.innerHTML = `<div class="error-text" style="padding:20px;">[Ошибка] ${err.message}</div>`;
+      }
+
+      btn.disabled = false;
+      btn.textContent = "Найти компании";
+    }
+
+    // Restore saved API key
+    const savedKey = localStorage.getItem("openrouter_key");
+    if (savedKey) document.getElementById("apiKey").value = savedKey;
+  </script>
+</body>
+</html>
