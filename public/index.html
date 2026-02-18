@@ -557,6 +557,28 @@
       </div>
     </div>
 
+    <div id="ratings-section" style="display:none; margin-top: 40px;">
+      <h2 style="text-align:center; font-size:22px; margin-bottom:16px; color:#fff;">Поиск рейтингов в интернете</h2>
+      <div class="result-card" id="ratings-card">
+        <div class="result-header">
+          <span class="model-badge" style="background:#20b2aa;">Perplexity</span>
+          <span class="model-name">Поиск рейтинговых сайтов</span>
+        </div>
+        <div style="padding: 20px;">
+          <div id="ratings-loading" class="loading" style="display:none;"><div class="spinner"></div>Perplexity ищет рейтинги...</div>
+          <div class="download-progress" id="ratings-progress"></div>
+          <div class="companies-grid" id="ratings-grid"></div>
+          <div id="rating-preview-wrap" style="display:none; margin-top: 16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <span id="rating-preview-title" style="font-size:14px; color:#58a6ff; font-weight:600;"></span>
+              <button class="copy-btn" onclick="document.getElementById('rating-preview-wrap').style.display='none'">Закрыть</button>
+            </div>
+            <iframe id="rating-preview-iframe" class="company-preview-frame" sandbox="allow-scripts allow-same-origin"></iframe>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="sites-section" style="display:none; margin-top: 40px;">
       <h2 style="text-align:center; font-size:22px; margin-bottom:16px; color:#fff;">Загрузка сайтов компаний</h2>
       <div class="result-card" id="sites-card">
@@ -709,8 +731,10 @@
 
     let compilerRawXml = ""; // Store for copy button
     let canvasRawHtml = ""; // Store for copy button
-    let extractedCompanies = []; // [{name, url, status}]
+    let extractedCompanies = []; // [{name, url, status, errorReason}]
     let downloadedSites = {};    // {name: {html, text}}
+    let extractedRatings = [];   // [{name, url, status, errorReason}]
+    let downloadedRatings = {};  // {name: {html, text}}
 
     // Strip HTML to plain text for AI processing
     function extractText(html) {
@@ -732,24 +756,34 @@
       document.getElementById('download-progress').textContent =
         `Загружено: ${doneCount} из ${totalCount}` + (errorCount > 0 ? ` (ошибок: ${errorCount})` : '');
 
-      grid.innerHTML = extractedCompanies.map((company, idx) => `
+      grid.innerHTML = extractedCompanies.map((company, idx) => {
+        const tooltip = company.status === 'error'
+          ? `Ошибка: ${company.errorReason || 'неизвестна'}\nURL: ${company.url || '—'}`
+          : (company.url || 'URL не найден');
+        return `
         <button class="company-btn status-${company.status}"
                 onclick="previewCompanySite(${idx})"
-                title="${company.url || 'URL не найден'}">
+                title="${tooltip}">
           <span class="company-status-icon ${company.status}"></span>
           <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${company.name}</span>
           ${company.status === 'loading' ? '<span class="spinner-small"></span>' : ''}
-        </button>
-      `).join('');
+        </button>`;
+      }).join('');
 
       const fillBtn = document.getElementById('fill-btn');
       if (fillBtn) fillBtn.disabled = doneCount === 0;
     }
 
-    // Preview a downloaded company site in iframe
+    // Preview a downloaded company site in iframe (or show error details)
     function previewCompanySite(idx) {
       const company = extractedCompanies[idx];
-      if (!company || company.status !== 'done') return;
+      if (!company) return;
+
+      if (company.status === 'error') {
+        alert(`Ошибка загрузки: ${company.name}\nURL: ${company.url || '—'}\nПричина: ${company.errorReason || 'неизвестна'}`);
+        return;
+      }
+      if (company.status !== 'done') return;
 
       const wrap = document.getElementById('company-preview-wrap');
       const iframe = document.getElementById('company-preview-iframe');
@@ -761,22 +795,62 @@
       wrap.scrollIntoView({ behavior: 'smooth' });
     }
 
-    // Download a single company site via CORS proxy
-    async function downloadCompanySite(company, index) {
-      if (!company.url) {
-        extractedCompanies[index].status = 'error';
-        renderCompaniesGrid();
+    // Render ratings grid (analogous to companies grid)
+    function renderRatingsGrid() {
+      const grid = document.getElementById('ratings-grid');
+      if (!grid) return;
+
+      const doneCount = extractedRatings.filter(c => c.status === 'done').length;
+      const totalCount = extractedRatings.length;
+      const errorCount = extractedRatings.filter(c => c.status === 'error').length;
+
+      document.getElementById('ratings-progress').textContent =
+        `Загружено рейтингов: ${doneCount} из ${totalCount}` + (errorCount > 0 ? ` (ошибок: ${errorCount})` : '');
+
+      grid.innerHTML = extractedRatings.map((rating, idx) => {
+        const tooltip = rating.status === 'error'
+          ? `Ошибка: ${rating.errorReason || 'неизвестна'}\nURL: ${rating.url || '—'}`
+          : (rating.url || 'URL не найден');
+        return `
+        <button class="company-btn status-${rating.status}"
+                onclick="previewRatingSite(${idx})"
+                title="${tooltip}">
+          <span class="company-status-icon ${rating.status}"></span>
+          <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${rating.name}</span>
+          ${rating.status === 'loading' ? '<span class="spinner-small"></span>' : ''}
+        </button>`;
+      }).join('');
+    }
+
+    // Preview a downloaded rating site in iframe (or show error details)
+    function previewRatingSite(idx) {
+      const rating = extractedRatings[idx];
+      if (!rating) return;
+
+      if (rating.status === 'error') {
+        alert(`Ошибка загрузки: ${rating.name}\nURL: ${rating.url || '—'}\nПричина: ${rating.errorReason || 'неизвестна'}`);
         return;
       }
+      if (rating.status !== 'done') return;
 
-      extractedCompanies[index].status = 'loading';
-      renderCompaniesGrid();
+      const wrap = document.getElementById('rating-preview-wrap');
+      const iframe = document.getElementById('rating-preview-iframe');
+      const title = document.getElementById('rating-preview-title');
 
+      title.textContent = `${rating.name} — ${rating.url}`;
+      iframe.srcdoc = downloadedRatings[rating.name]?.html || '<p>Нет данных</p>';
+      wrap.style.display = 'block';
+      wrap.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    // Download a single site via CORS proxy (universal — works for companies & ratings)
+    async function downloadSite(url) {
       const proxies = [
-        { url: `https://api.allorigins.win/get?url=${encodeURIComponent(company.url)}`, type: 'json' },
-        { url: `https://corsproxy.io/?url=${encodeURIComponent(company.url)}`, type: 'raw' },
+        { url: `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`, type: 'json' },
+        { url: `https://corsproxy.io/?url=${encodeURIComponent(url)}`, type: 'raw' },
       ];
 
+      let lastError = '';
       for (const proxy of proxies) {
         try {
           const controller = new AbortController();
@@ -785,7 +859,10 @@
           const resp = await fetch(proxy.url, { signal: controller.signal });
           clearTimeout(timeout);
 
-          if (!resp.ok) continue;
+          if (!resp.ok) {
+            lastError = `HTTP ${resp.status} (${proxy.type === 'json' ? 'allorigins' : 'corsproxy'})`;
+            continue;
+          }
 
           let html;
           if (proxy.type === 'json') {
@@ -795,20 +872,66 @@
             html = await resp.text();
           }
 
-          if (!html || html.length < 100) continue;
+          if (!html || html.length < 100) {
+            lastError = 'Пустой или слишком короткий ответ';
+            continue;
+          }
 
-          const text = extractText(html).substring(0, 5000);
-          downloadedSites[company.name] = { html, text };
-          extractedCompanies[index].status = 'done';
-          renderCompaniesGrid();
-          return;
+          const text = extractText(html).substring(0, 8000);
+          return { ok: true, html, text };
         } catch (e) {
+          lastError = e.name === 'AbortError' ? 'Таймаут (15 сек)' : e.message;
           continue;
         }
       }
 
-      extractedCompanies[index].status = 'error';
+      return { ok: false, error: lastError || 'Все прокси недоступны' };
+    }
+
+    // Download a single company site
+    async function downloadCompanySite(company, index) {
+      if (!company.url) {
+        extractedCompanies[index].status = 'error';
+        extractedCompanies[index].errorReason = 'URL не найден';
+        renderCompaniesGrid();
+        return;
+      }
+
+      extractedCompanies[index].status = 'loading';
       renderCompaniesGrid();
+
+      const result = await downloadSite(company.url);
+      if (result.ok) {
+        downloadedSites[company.name] = { html: result.html, text: result.text };
+        extractedCompanies[index].status = 'done';
+      } else {
+        extractedCompanies[index].status = 'error';
+        extractedCompanies[index].errorReason = result.error;
+      }
+      renderCompaniesGrid();
+    }
+
+    // Download a single rating site
+    async function downloadRatingSite(rating, index) {
+      if (!rating.url) {
+        extractedRatings[index].status = 'error';
+        extractedRatings[index].errorReason = 'URL не найден';
+        renderRatingsGrid();
+        return;
+      }
+
+      extractedRatings[index].status = 'loading';
+      renderRatingsGrid();
+
+      const result = await downloadSite(rating.url);
+      if (result.ok) {
+        downloadedRatings[rating.name] = { html: result.html, text: result.text };
+        extractedRatings[index].status = 'done';
+      } else {
+        extractedRatings[index].status = 'error';
+        extractedRatings[index].errorReason = result.error;
+      }
+      renderRatingsGrid();
     }
 
     // Step 7b: Fill template with real data from downloaded sites + user data
@@ -825,16 +948,30 @@
       fillBtn.disabled = true;
       fillLoading.style.display = "flex";
 
+      // Build ratings data blocks (priority source — structured reviews)
+      const MAX_RATINGS_CHARS = 60000;
+      let ratingsChars = 0;
+      const ratingDataBlocks = extractedRatings
+        .filter(r => r.status === 'done' && downloadedRatings[r.name])
+        .map(r => {
+          const text = downloadedRatings[r.name].text.substring(0, 8000);
+          ratingsChars += text.length;
+          if (ratingsChars > MAX_RATINGS_CHARS) return null;
+          return `=== ${r.name} (${r.url}) ===\n${text}`;
+        })
+        .filter(Boolean)
+        .join("\n\n---\n\n");
+
       // Build company data blocks with token budget management
-      const MAX_TOTAL_CHARS = 80000;
-      let totalChars = 0;
+      const MAX_COMPANY_CHARS = 40000;
+      let companyChars = 0;
       const companyDataBlocks = extractedCompanies
         .filter(c => c.status === 'done' && downloadedSites[c.name])
         .map((c, i) => {
           const limit = i < 10 ? 5000 : 2000;
           const text = downloadedSites[c.name].text.substring(0, limit);
-          totalChars += text.length;
-          if (totalChars > MAX_TOTAL_CHARS) return null;
+          companyChars += text.length;
+          if (companyChars > MAX_COMPANY_CHARS) return null;
           return `=== ${c.name} (${c.url}) ===\n${text}`;
         })
         .filter(Boolean)
@@ -849,27 +986,32 @@
 ${canvasRawHtml}
 </template>
 
-2. ДАННЫЕ КОМПАНИЙ (извлечённые с их сайтов):
+2. ДАННЫЕ С РЕЙТИНГОВЫХ САЙТОВ (структурированные обзоры — ОСНОВНОЙ источник фактов):
+<ratings_data>
+${ratingDataBlocks || "(Рейтинговые сайты не были скачаны)"}
+</ratings_data>
+
+3. ДАННЫЕ С САЙТОВ КОМПАНИЙ (дополнительный источник):
 <companies_data>
-${companyDataBlocks}
+${companyDataBlocks || "(Сайты компаний не были скачаны)"}
 </companies_data>
 
-3. ДАННЫЕ КОМПАНИИ ПОЛЬЗОВАТЕЛЯ (ДОЛЖНА СТАТЬ #1 В РЕЙТИНГЕ):
+4. ДАННЫЕ КОМПАНИИ ПОЛЬЗОВАТЕЛЯ (ДОЛЖНА СТАТЬ #1 В РЕЙТИНГЕ):
 <user_company>
 ${userCompanyData || "(Пользователь не предоставил данные своей компании)"}
 </user_company>
 
-4. XML-СТРУКТУРА КРИТЕРИЕВ:
+5. XML-СТРУКТУРА КРИТЕРИЕВ:
 <criteria>
 ${compilerRawXml}
 </criteria>
 
 ЗАДАЧА:
-1. Проанализируй данные каждой компании из раздела companies_data.
-2. Для каждой компании извлеки: название, описание, ключевые преимущества, цены, особенности.
+1. Используй данные рейтинговых сайтов (ratings_data) как ОСНОВНОЙ источник фактов: названия компаний, описания, цены, баллы, преимущества, недостатки. Это уже структурированная информация.
+2. Дополняй данными с сайтов самих компаний (companies_data) — для уточнения деталей.
 3. Наполни HTML-шаблон реальными данными:
    - Замени placeholder-названия на реальные.
-   - Замени placeholder-описания на реальные данные с сайтов.
+   - Замени placeholder-описания на реальные данные.
    - Заполни метрики на основе анализа данных.
    - Обнови баллы и рейтинги.
 4. КРИТИЧЕСКИ ВАЖНО: Компания пользователя (из user_company) ДОЛЖНА быть на 1 месте с бейджем "Выбор редакции" и наивысшими баллами.
@@ -1464,6 +1606,84 @@ ${compilerRawXml}`;
         }
       } catch (err) {
         canvasLoading.innerHTML = `<div class="error-text" style="padding:20px;">[Ошибка] ${err.message}</div>`;
+      }
+
+      // --- Запрос 6.5: Perplexity — поиск рейтингов ---
+      btn.textContent = "Поиск рейтингов (Perplexity)...";
+
+      const ratingsSection = document.getElementById("ratings-section");
+      const ratingsLoading = document.getElementById("ratings-loading");
+      ratingsSection.style.display = "block";
+      ratingsLoading.style.display = "flex";
+      document.getElementById('ratings-progress').textContent = '';
+      ratingsSection.scrollIntoView({ behavior: "smooth" });
+
+      const perplexityPrompt = `Найди 10-15 лучших рейтингов и обзоров компаний по теме "${niche}" в русскоязычном интернете.
+
+Для каждого рейтинга укажи:
+- Название статьи/сайта
+- Прямой URL страницы рейтинга
+
+Ищи именно страницы-рейтинги, обзоры, сравнения, ТОП-листы — где уже собрана структурированная информация о компаниях данной ниши.
+
+ВАЖНО: Верни ТОЛЬКО JSON-массив и НИЧЕГО больше. Без markdown, без пояснений, без бэктиков.
+Формат:
+[{"name": "Название рейтинга", "url": "https://..."}]`;
+
+      try {
+        const perplexityData = await callModel("perplexity/sonar-pro", [{ role: "user", content: perplexityPrompt }], apiKey);
+        ratingsLoading.style.display = "none";
+
+        if (perplexityData.error) {
+          document.getElementById('ratings-progress').textContent = `Ошибка Perplexity: ${perplexityData.error}`;
+        } else {
+          let jsonStr = perplexityData.content.replace(/^```json?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+
+          // Try to extract JSON from response (Perplexity may add text around it)
+          const jsonMatch = jsonStr.match(/\[[\s\S]*\]/);
+          if (jsonMatch) jsonStr = jsonMatch[0];
+
+          try {
+            const ratings = JSON.parse(jsonStr);
+
+            // Deduplicate by URL domain
+            const seenUrls = new Set();
+            extractedRatings = ratings.filter(r => {
+              if (!r.url) return false;
+              try {
+                const domain = new URL(r.url).hostname;
+                if (seenUrls.has(domain)) return false;
+                seenUrls.add(domain);
+                return true;
+              } catch { return false; }
+            }).map(r => ({ name: r.name, url: r.url, status: 'pending' }));
+
+            renderRatingsGrid();
+
+            // Download all rating pages with concurrency limit of 5
+            const rQueue = [...extractedRatings.keys()];
+
+            async function processRatingQueue() {
+              while (rQueue.length > 0) {
+                const idx = rQueue.shift();
+                await downloadRatingSite(extractedRatings[idx], idx);
+              }
+            }
+
+            const rWorkers = Array.from(
+              { length: Math.min(5, extractedRatings.length) },
+              () => processRatingQueue()
+            );
+
+            await Promise.all(rWorkers);
+
+          } catch (parseErr) {
+            document.getElementById('ratings-progress').textContent = `Ошибка парсинга JSON: ${parseErr.message}. Ответ: ${perplexityData.content.substring(0, 200)}`;
+          }
+        }
+      } catch (err) {
+        ratingsLoading.style.display = "none";
+        document.getElementById('ratings-progress').textContent = `Ошибка: ${err.message}`;
       }
 
       // --- Запрос 7a: Извлечение компаний + скачивание сайтов ---
