@@ -496,6 +496,17 @@
       </div>
 
       <button id="searchBtn" onclick="search()">Найти компании</button>
+
+      <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #30363d;">
+        <details>
+          <summary style="cursor:pointer; font-size:13px; color:#8b949e;">Тест загрузки сайтов (проверить прокси)</summary>
+          <div style="margin-top: 8px; display:flex; gap:8px;">
+            <input type="text" id="testUrl" placeholder="https://example.com" style="flex:1;" />
+            <button onclick="testDownload()" style="white-space:nowrap;">Тест</button>
+          </div>
+          <div id="testResult" style="margin-top:8px; font-size:12px; color:#8b949e; white-space:pre-wrap;"></div>
+        </details>
+      </div>
     </div>
 
     <div class="results" id="results"></div>
@@ -843,14 +854,22 @@
       wrap.scrollIntoView({ behavior: 'smooth' });
     }
 
-    // Download a single site via CORS proxy (universal — works for companies & ratings)
-    async function downloadSite(url) {
-      const proxies = [
-        { url: `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`, type: 'json' },
-        { url: `https://corsproxy.io/?url=${encodeURIComponent(url)}`, type: 'raw' },
+    // CORS proxy list — tried in order, first success wins
+    // Tested 2026-02-18: codetabs works reliably, allorigins/corsproxy.io are down
+    function getProxies(url) {
+      const encoded = encodeURIComponent(url);
+      return [
+        { name: 'codetabs',    url: `https://api.codetabs.com/v1/proxy?quest=${encoded}`, type: 'raw' },
+        { name: 'allorigins',  url: `https://api.allorigins.win/get?url=${encoded}`, type: 'json', field: 'contents' },
+        { name: 'corsproxy',   url: `https://corsproxy.io/?url=${encoded}`, type: 'raw' },
       ];
+    }
 
-      let lastError = '';
+    // Download a single site via CORS proxy (universal — works for companies & ratings)
+    async function downloadSite(url, verbose) {
+      const proxies = getProxies(url);
+      const errors = [];
+
       for (const proxy of proxies) {
         try {
           const controller = new AbortController();
@@ -860,32 +879,57 @@
           clearTimeout(timeout);
 
           if (!resp.ok) {
-            lastError = `HTTP ${resp.status} (${proxy.type === 'json' ? 'allorigins' : 'corsproxy'})`;
+            errors.push(`${proxy.name}: HTTP ${resp.status}`);
             continue;
           }
 
           let html;
           if (proxy.type === 'json') {
             const data = await resp.json();
-            html = data.contents;
+            html = data[proxy.field];
           } else {
             html = await resp.text();
           }
 
           if (!html || html.length < 100) {
-            lastError = 'Пустой или слишком короткий ответ';
+            errors.push(`${proxy.name}: пустой/короткий ответ (${(html||'').length} байт)`);
             continue;
           }
 
           const text = extractText(html).substring(0, 8000);
+          if (verbose) return { ok: true, html, text, proxy: proxy.name, size: html.length, errors };
           return { ok: true, html, text };
         } catch (e) {
-          lastError = e.name === 'AbortError' ? 'Таймаут (15 сек)' : e.message;
+          const reason = e.name === 'AbortError' ? 'таймаут 15с' : e.message;
+          errors.push(`${proxy.name}: ${reason}`);
           continue;
         }
       }
 
-      return { ok: false, error: lastError || 'Все прокси недоступны' };
+      return { ok: false, error: errors.join(' → ') || 'Все прокси недоступны', errors };
+    }
+
+    // Test download from the form
+    async function testDownload() {
+      const url = document.getElementById('testUrl').value.trim();
+      const resultEl = document.getElementById('testResult');
+      if (!url) { resultEl.textContent = 'Введите URL'; return; }
+
+      resultEl.textContent = 'Загрузка...';
+      resultEl.style.color = '#d29922';
+
+      const result = await downloadSite(url, true);
+
+      if (result.ok) {
+        resultEl.style.color = '#238636';
+        resultEl.textContent = `✅ Успех через ${result.proxy}\nРазмер HTML: ${result.size} байт\nТекст: ${result.text.substring(0, 300)}...`;
+        if (result.errors.length > 0) {
+          resultEl.textContent += `\n\n⚠️ Ошибки других прокси:\n${result.errors.join('\n')}`;
+        }
+      } else {
+        resultEl.style.color = '#f85149';
+        resultEl.textContent = `❌ Все прокси не сработали:\n${result.errors.join('\n')}`;
+      }
     }
 
     // Download a single company site
