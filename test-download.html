@@ -148,6 +148,18 @@
         <button class="btn-primary" onclick="testSingle()">Скачать</button>
       </div>
       <div class="log" id="singleLog"><span class="info">Введите URL и нажмите «Скачать»</span></div>
+      <div id="singlePreview" style="display:none; margin-top:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="font-size:14px; color:#58a6ff; font-weight:600;">Превью скачанной страницы</span>
+          <div style="display:flex; gap:8px;">
+            <button class="btn-secondary" onclick="switchSingleView('preview')" id="singleTabPreview" style="font-size:12px; padding:6px 12px; background:#238636; color:#fff;">Превью</button>
+            <button class="btn-secondary" onclick="switchSingleView('text')" id="singleTabText" style="font-size:12px; padding:6px 12px;">Текст</button>
+            <button class="btn-secondary" onclick="document.getElementById('singlePreview').style.display='none'" style="font-size:12px; padding:6px 12px;">Закрыть</button>
+          </div>
+        </div>
+        <iframe id="singleIframe" class="preview-frame" sandbox="allow-scripts allow-same-origin"></iframe>
+        <pre id="singleTextView" class="log" style="display:none; max-height:500px; margin-top:0;"></pre>
+      </div>
     </div>
 
     <!-- Тест прокси -->
@@ -247,33 +259,64 @@ https://site3.com
     }
 
     // ========== 1. Single URL test ==========
+    let singleDownloadedHtml = '';
+    let singleDownloadedText = '';
+
+    function switchSingleView(tab) {
+      const iframe = document.getElementById('singleIframe');
+      const textView = document.getElementById('singleTextView');
+      const tabPreview = document.getElementById('singleTabPreview');
+      const tabText = document.getElementById('singleTabText');
+      if (tab === 'preview') {
+        iframe.style.display = 'block';
+        textView.style.display = 'none';
+        tabPreview.style.background = '#238636'; tabPreview.style.color = '#fff';
+        tabText.style.background = '#30363d'; tabText.style.color = '#e1e4e8';
+      } else {
+        iframe.style.display = 'none';
+        textView.style.display = 'block';
+        tabPreview.style.background = '#30363d'; tabPreview.style.color = '#e1e4e8';
+        tabText.style.background = '#238636'; tabText.style.color = '#fff';
+      }
+    }
+
     async function testSingle() {
       const url = document.getElementById('singleUrl').value.trim();
       const log = document.getElementById('singleLog');
+      const preview = document.getElementById('singlePreview');
       if (!url) { log.innerHTML = '<span class="err">Введите URL</span>'; return; }
 
       log.innerHTML = '<span class="warn">⏳ Загрузка...</span>';
+      preview.style.display = 'none';
 
       const result = await downloadSite(url, true);
 
       if (result.ok) {
-        let html = `<span class="ok">✅ Успех через ${result.proxy} (${result.ms}мс)</span>\n`;
-        html += `<span class="info">Размер HTML: ${(result.size / 1024).toFixed(1)} KB</span>\n`;
-        html += `<span class="info">Текст (первые 500 символов):</span>\n`;
-        html += escapeHtml(result.text.substring(0, 500)) + '...\n';
+        let logHtml = `<span class="ok">✅ Успех через ${result.proxy} (${result.ms}мс)</span>\n`;
+        logHtml += `<span class="info">Размер HTML: ${(result.size / 1024).toFixed(1)} KB | Текст: ${result.text.length} символов</span>\n`;
         if (result.errors.length > 0) {
-          html += `\n<span class="warn">⚠️ Другие прокси:</span>\n`;
+          logHtml += `<span class="warn">⚠️ Другие прокси:</span>\n`;
           for (const e of result.errors) {
-            html += `<span class="err">  ✗ ${e.proxy}: ${e.error}${e.ms ? ` (${e.ms}мс)` : ''}</span>\n`;
+            logHtml += `<span class="err">  ✗ ${e.proxy}: ${e.error}${e.ms ? ` (${e.ms}мс)` : ''}</span>\n`;
           }
         }
-        log.innerHTML = html;
+        log.innerHTML = logHtml;
+
+        // Show preview
+        singleDownloadedHtml = result.html;
+        singleDownloadedText = result.text;
+        document.getElementById('singleIframe').srcdoc = result.html;
+        document.getElementById('singleTextView').textContent = result.text;
+        preview.style.display = 'block';
+        switchSingleView('preview');
+        preview.scrollIntoView({ behavior: 'smooth' });
       } else {
-        let html = '<span class="err">❌ Все прокси не сработали:</span>\n';
+        let logHtml = '<span class="err">❌ Все прокси не сработали:</span>\n';
         for (const e of result.errors) {
-          html += `<span class="err">  ✗ ${e.proxy}: ${e.error}${e.ms ? ` (${e.ms}мс)` : ''}</span>\n`;
+          logHtml += `<span class="err">  ✗ ${e.proxy}: ${e.error}${e.ms ? ` (${e.ms}мс)` : ''}</span>\n`;
         }
-        log.innerHTML = html;
+        log.innerHTML = logHtml;
+        preview.style.display = 'none';
       }
     }
 
