@@ -875,12 +875,14 @@
         try {
           const controller = new AbortController();
           const timeout = setTimeout(() => controller.abort(), 15000);
+          const start = Date.now();
 
           const resp = await fetch(proxy.url, { signal: controller.signal });
           clearTimeout(timeout);
+          const elapsed = Date.now() - start;
 
           if (!resp.ok) {
-            errors.push(`${proxy.name}: HTTP ${resp.status}`);
+            errors.push({ proxy: proxy.name, error: `HTTP ${resp.status}`, ms: elapsed });
             continue;
           }
 
@@ -893,21 +895,22 @@
           }
 
           if (!html || html.length < 100) {
-            errors.push(`${proxy.name}: пустой/короткий ответ (${(html||'').length} байт)`);
+            errors.push({ proxy: proxy.name, error: `пустой/короткий ответ (${(html||'').length} байт)`, ms: elapsed });
             continue;
           }
 
           const text = extractText(html).substring(0, 8000);
-          if (verbose) return { ok: true, html, text, proxy: proxy.name, size: html.length, errors };
+          if (verbose) return { ok: true, html, text, proxy: proxy.name, size: html.length, ms: elapsed, errors };
           return { ok: true, html, text };
         } catch (e) {
           const reason = e.name === 'AbortError' ? 'таймаут 15с' : e.message;
-          errors.push(`${proxy.name}: ${reason}`);
+          errors.push({ proxy: proxy.name, error: reason, ms: null });
           continue;
         }
       }
 
-      return { ok: false, error: errors.join(' → ') || 'Все прокси недоступны', errors };
+      const errorStr = errors.map(e => `${e.proxy}: ${e.error}${e.ms ? ` (${e.ms}мс)` : ''}`).join(' → ');
+      return { ok: false, error: errorStr || 'Все прокси недоступны', errors };
     }
 
     // Test download from the form
@@ -923,13 +926,13 @@
 
       if (result.ok) {
         resultEl.style.color = '#238636';
-        resultEl.textContent = `✅ Успех через ${result.proxy}\nРазмер HTML: ${result.size} байт\nТекст: ${result.text.substring(0, 300)}...`;
+        resultEl.textContent = `✅ Успех через ${result.proxy} (${result.ms}мс)\nРазмер HTML: ${(result.size / 1024).toFixed(1)} KB | Текст: ${result.text.length} символов`;
         if (result.errors.length > 0) {
-          resultEl.textContent += `\n\n⚠️ Ошибки других прокси:\n${result.errors.join('\n')}`;
+          resultEl.textContent += `\n⚠️ Другие прокси:\n${result.errors.map(e => `  ✗ ${e.proxy}: ${e.error}${e.ms ? ` (${e.ms}мс)` : ''}`).join('\n')}`;
         }
       } else {
         resultEl.style.color = '#f85149';
-        resultEl.textContent = `❌ Все прокси не сработали:\n${result.errors.join('\n')}`;
+        resultEl.textContent = `❌ Все прокси не сработали:\n${result.errors.map(e => `  ✗ ${e.proxy}: ${e.error}${e.ms ? ` (${e.ms}мс)` : ''}`).join('\n')}`;
       }
     }
 
