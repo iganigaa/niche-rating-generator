@@ -491,8 +491,13 @@
         <input type="text" id="niche" placeholder="например: кибербезопасность" oninput="updatePreview()" />
       </div>
 
+      <div class="input-group">
+        <label>Гео <span style="color:#8b949e; font-weight:400;">(необязательно)</span></label>
+        <input type="text" id="geo" placeholder="например: Москва, Россия, Казахстан..." oninput="updatePreview()" />
+      </div>
+
       <div class="prompt-preview" id="preview">
-        Составь список 30 лучших компаний <span class="highlight">...</span>
+        Составь список 30 <span class="highlight">...</span>
       </div>
 
       <button id="searchBtn" onclick="search()">Найти компании</button>
@@ -1113,8 +1118,10 @@ ${compilerRawXml}
 
     function updatePreview() {
       const niche = document.getElementById("niche").value.trim();
+      const geo = document.getElementById("geo").value.trim();
+      const geoStr = geo ? ` в <span class="highlight">${geo}</span>` : '';
       document.getElementById("preview").innerHTML =
-        `Составь список 30 лучших компаний <span class="highlight">${niche || "..."}</span>`;
+        `Составь список 30 <span class="highlight">${niche || "..."}</span>${geoStr}`;
     }
 
     function toggleApiKey() {
@@ -1233,7 +1240,10 @@ ${compilerRawXml}
       btn.disabled = true;
       btn.textContent = "Загрузка...";
 
-      const prompt1 = `Составь список 30 лучших компаний ${niche}`;
+      const geo = document.getElementById("geo").value.trim();
+      const geoStr = geo ? ` в ${geo}` : '';
+
+      const prompt1 = `Составь список 30 ${niche}${geoStr}`;
       const prompt2 = `Почему именно эти сервисы были поставлены в ТОП. 1. Составь список критериев, по которым ты оценивал сайты 2. Разгруппируй эти критерии на смысловые группы 3. Отранжируй эти критерии в порядке уменьшения веса влияния на место в рейтинге`;
 
       // Reset conversations
@@ -1467,7 +1477,7 @@ ${grokAudienceRaw}
       const sitePrompt = `РОЛЬ:
 
 Ты — Senior SEO-специалист, эксперт по GEO (Generative Engine Optimization) и Fullstack-разработчик.
-Твоя задача — создать независимый рейтинговый портал (агрегатор) по теме "${niche}".
+Твоя задача — создать независимый рейтинговый портал (агрегатор) по теме "${niche}"${geoStr}.
 
 ЦЕЛЬ:
 
@@ -1487,7 +1497,7 @@ ${grokAudienceRaw}
 
 Логотип.
 
-H1: Рейтинг компаний в нише "${niche}" — актуальный обзор.
+H1: Рейтинг компаний в нише "${niche}"${geoStr} — актуальный обзор.
 
 E-E-A-T Элементы:
 
@@ -1666,7 +1676,7 @@ ${compilerRawXml}`;
       document.getElementById('ratings-progress').textContent = '';
       ratingsSection.scrollIntoView({ behavior: "smooth" });
 
-      const perplexityPrompt = `Найди 10-15 лучших рейтингов и обзоров компаний по теме "${niche}" в русскоязычном интернете.
+      const perplexityPrompt = `Найди 10-15 лучших рейтингов и обзоров компаний по теме "${niche}"${geoStr} в русскоязычном интернете.
 
 Для каждого рейтинга укажи:
 - Название статьи/сайта
