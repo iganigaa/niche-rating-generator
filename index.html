@@ -862,7 +862,7 @@
       <div class="result-card" id="sites-card">
         <div class="result-header">
           <span class="model-badge" style="background:#8b5cf6;">Web</span>
-          <span class="model-name">Скачивание сайтов компаний</span>
+          <span class="model-name">Скачивание сайтов TOP-5 компаний</span>
         </div>
         <div style="padding: 20px;">
           <div class="download-progress" id="download-progress">Извлечение списка компаний...</div>
@@ -1404,14 +1404,13 @@
         .filter(Boolean)
         .join("\n\n---\n\n");
 
-      // Build company data blocks with token budget management
+      // Build company data blocks — only TOP-5 companies have downloaded sites
       const MAX_COMPANY_CHARS = 40000;
       let companyChars = 0;
       const companyDataBlocks = extractedCompanies
         .filter(c => c.status === 'done' && downloadedSites[c.name])
-        .map((c, i) => {
-          const limit = i < 10 ? 5000 : 2000;
-          const text = downloadedSites[c.name].text.substring(0, limit);
+        .map(c => {
+          const text = downloadedSites[c.name].text.substring(0, 5000);
           companyChars += text.length;
           if (companyChars > MAX_COMPANY_CHARS) return null;
           return `=== ${c.name} (${c.url}) ===\n${text}`;
@@ -1454,7 +1453,7 @@ ${cleanedCanvasHtml}
 ${ratingDataBlocks || "(Рейтинговые сайты не были скачаны)"}
 </ratings_data>
 
-3. ДАННЫЕ С САЙТОВ КОМПАНИЙ (дополнительный источник):
+3. ДАННЫЕ С САЙТОВ КОМПАНИЙ (только TOP-5, дополнительный источник):
 <companies_data>
 ${companyDataBlocks || "(Сайты компаний не были скачаны)"}
 </companies_data>
@@ -1469,9 +1468,14 @@ ${userCompanyData || "(Пользователь не предоставил да
 ${compilerRawXml}
 </criteria>
 
+ИСТОЧНИКИ ДАННЫХ И ПРИОРИТЕТ:
+1. РЕЙТИНГОВЫЕ САЙТЫ (приоритет) — данные для ВСЕХ компаний, включая TOP-5 и компактную таблицу 6+.
+2. САЙТЫ КОМПАНИЙ (TOP-5 только) — детальные данные для расширенных карточек первых 5 компаний.
+3. Для компаний 6+ используй ТОЛЬКО данные из рейтинговых сайтов. Сайты этих компаний НЕ скачаны.
+
 ЗАДАЧА:
-1. Используй данные рейтинговых сайтов (ratings_data) как ОСНОВНОЙ источник фактов: названия компаний, описания, цены, баллы, преимущества, недостатки. Это уже структурированная информация.
-2. Дополняй данными с сайтов самих компаний (companies_data) — для уточнения деталей.
+1. Используй данные рейтинговых сайтов (ratings_data) как ОСНОВНОЙ источник фактов: названия компаний, описания, цены, баллы, преимущества, недостатки.
+2. Дополняй данными с сайтов компаний (companies_data) — для TOP-5 карточек.
 3. Наполни HTML-шаблон реальными данными:
    - Замени placeholder-названия на реальные.
    - Замени placeholder-описания на реальные данные.
@@ -2955,8 +2959,14 @@ ${step1Responses}`;
 
             renderCompaniesGrid();
 
-            // Download all sites with concurrency limit of 5
-            const queue = [...extractedCompanies.keys()];
+            // Download only TOP-5 company sites (or TOP-4 if user company injection exists)
+            const hasUserCompany = !!document.getElementById("user-company-data").value.trim();
+            const topN = hasUserCompany ? 4 : 5; // #1 = user company, so download 4 others
+            const topIndices = extractedCompanies
+              .map((_, i) => i)
+              .slice(0, topN);
+
+            const queue = [...topIndices];
 
             async function processQueue() {
               while (queue.length > 0) {
@@ -2966,7 +2976,7 @@ ${step1Responses}`;
             }
 
             const workers = Array.from(
-              { length: Math.min(5, extractedCompanies.length) },
+              { length: Math.min(5, queue.length) },
               () => processQueue()
             );
 
