@@ -12,6 +12,7 @@
       background: #0f1117;
       color: #e1e4e8;
       min-height: 100vh;
+      padding-top: 50px;
     }
 
     .container {
@@ -752,20 +753,144 @@
       border-color: #da3633;
       color: #fff;
     }
+
+    /* === SPA Navigation === */
+    #app-nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 9999;
+      height: 50px;
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      display: flex;
+      align-items: center;
+    }
+    .nav-inner {
+      max-width: 1200px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 0 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .nav-logo {
+      font-size: 18px;
+      font-weight: 700;
+      color: #58a6ff;
+      text-decoration: none;
+      letter-spacing: 1px;
+    }
+    .nav-logo:hover { color: #79c0ff; }
+    .nav-links { display: flex; gap: 4px; }
+    .nav-link {
+      padding: 8px 16px;
+      font-size: 13px;
+      color: #8b949e;
+      text-decoration: none;
+      border-radius: 6px;
+      transition: background 0.15s, color 0.15s;
+    }
+    .nav-link:hover { background: #21262d; color: #e1e4e8; }
+    .nav-link.active { background: #238636; color: #fff; }
+    .screen-hidden { display: none !important; }
+
+    /* === Dashboard === */
+    #screen-dashboard {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
+    .dashboard-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 32px;
+    }
+    .dashboard-header h1 { font-size: 24px; text-align: left; }
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 16px;
+    }
+    .dashboard-empty {
+      text-align: center;
+      padding: 80px 20px;
+      color: #8b949e;
+    }
+    .dashboard-empty p { font-size: 15px; margin-bottom: 20px; }
+
+    /* === Project View === */
+    #screen-project {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
+    .project-header { margin-bottom: 24px; }
+    .project-header h1 { font-size: 24px; text-align: left; margin-bottom: 8px; }
+    .project-header-meta {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      color: #8b949e;
+      font-size: 13px;
+      flex-wrap: wrap;
+    }
+    .project-actions {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+    .project-actions button { padding: 8px 16px; font-size: 13px; }
+    .project-preview-frame {
+      width: 100%;
+      min-height: 600px;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      background: #fff;
+    }
+    .project-meta-section {
+      margin-top: 24px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+    }
+    .project-meta-section summary {
+      padding: 12px 16px;
+      cursor: pointer;
+      color: #8b949e;
+      font-size: 13px;
+      list-style: none;
+    }
+    .project-meta-section summary::-webkit-details-marker { display: none; }
+    .project-meta-section[open] summary { border-bottom: 1px solid #30363d; }
+    .project-meta-content {
+      padding: 16px;
+      font-size: 13px;
+      color: #8b949e;
+    }
   </style>
 </head>
 <body>
+  <nav id="app-nav">
+    <div class="nav-inner">
+      <a href="#/" class="nav-logo">NRG</a>
+      <div class="nav-links">
+        <a href="#/" class="nav-link" id="nav-link-dashboard">Проекты</a>
+        <a href="#/generator" class="nav-link" id="nav-link-generator">Новый проект</a>
+      </div>
+    </div>
+  </nav>
+
+  <div id="screen-dashboard" class="screen-hidden"></div>
+
+  <div id="screen-generator" class="screen-hidden">
   <div class="container">
     <h1>30 лучших компаний по нише</h1>
     <p class="subtitle">Введите нишу — получите списки от трёх нейросетей через OpenRouter</p>
-
-    <div class="projects-section" id="projects-section">
-      <div class="projects-header" onclick="toggleProjectsList()">
-        <h2>Мои проекты <span id="projects-count" style="color:#8b949e; font-weight:400;"></span></h2>
-        <span class="toggle-arrow" id="projects-arrow">▼</span>
-      </div>
-      <div class="projects-list" id="projects-list" style="display:none;"></div>
-    </div>
 
     <div class="form-section">
       <div class="input-group">
@@ -1004,6 +1129,9 @@
     </div>
 
   </div>
+  </div><!-- /screen-generator -->
+
+  <div id="screen-project" class="screen-hidden"></div>
 
   <script>
     // === Projects: localStorage ===
@@ -1017,6 +1145,84 @@
       edited: 'Отредактирован'
     };
 
+    // === SPA Router ===
+    function router() {
+      const hash = location.hash || '#/';
+
+      // Hide all screens
+      document.getElementById('screen-dashboard').classList.add('screen-hidden');
+      document.getElementById('screen-generator').classList.add('screen-hidden');
+      document.getElementById('screen-project').classList.add('screen-hidden');
+
+      // Remove active state from nav links
+      document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+
+      if (hash === '#/' || hash === '#' || hash === '') {
+        document.getElementById('screen-dashboard').classList.remove('screen-hidden');
+        document.getElementById('nav-link-dashboard').classList.add('active');
+        renderDashboard();
+      } else if (hash === '#/generator') {
+        document.getElementById('screen-generator').classList.remove('screen-hidden');
+        document.getElementById('nav-link-generator').classList.add('active');
+      } else if (hash.startsWith('#/project/')) {
+        const id = hash.split('/')[2];
+        document.getElementById('screen-project').classList.remove('screen-hidden');
+        document.getElementById('nav-link-dashboard').classList.add('active');
+        renderProject(id);
+      } else {
+        location.hash = '#/';
+      }
+    }
+
+    window.addEventListener('hashchange', router);
+
+    // === Dashboard ===
+    function renderDashboard() {
+      const projects = getProjects();
+      const container = document.getElementById('screen-dashboard');
+
+      if (projects.length === 0) {
+        container.innerHTML = `
+          <div class="dashboard-header">
+            <h1>Мои проекты</h1>
+          </div>
+          <div class="dashboard-empty">
+            <p>У вас пока нет проектов</p>
+            <button onclick="location.hash='#/generator'">Создать первый проект</button>
+          </div>
+        `;
+        return;
+      }
+
+      const cardsHtml = projects.map(p => `
+        <div class="project-card" data-id="${p.id}">
+          <div class="pc-niche">${escHtml(p.niche)}</div>
+          ${p.geo ? `<div class="pc-geo">${escHtml(p.geo)}</div>` : ''}
+          <div class="pc-meta">
+            <span class="pc-date">${new Date(p.updated_at || p.created_at).toLocaleDateString('ru-RU', {
+              day: 'numeric', month: 'short', year: 'numeric'
+            })}</span>
+            <span class="pc-status ${p.status}">${STATUS_LABELS[p.status] || p.status}</span>
+          </div>
+          <div class="pc-actions">
+            <button class="pc-open" onclick="location.hash='#/project/${p.id}'">Открыть</button>
+            <button onclick="duplicateProject('${p.id}')">Дубл.</button>
+            <button class="pc-delete" onclick="deleteProject('${p.id}')">Удалить</button>
+          </div>
+        </div>
+      `).join('');
+
+      container.innerHTML = `
+        <div class="dashboard-header">
+          <h1>Мои проекты <span style="color:#8b949e; font-weight:400;">(${projects.length})</span></h1>
+          <button onclick="location.hash='#/generator'">+ Новый проект</button>
+        </div>
+        <div class="dashboard-grid">
+          ${cardsHtml}
+        </div>
+      `;
+    }
+
     function getProjects() {
       try { return JSON.parse(localStorage.getItem(PROJECTS_KEY) || '[]'); }
       catch { return []; }
@@ -1026,42 +1232,127 @@
       localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
     }
 
-    function loadProjects() {
+    // === Project View ===
+    function renderProject(id) {
       const projects = getProjects();
-      const list = document.getElementById('projects-list');
-      const count = document.getElementById('projects-count');
-      count.textContent = projects.length > 0 ? `(${projects.length})` : '';
+      const project = projects.find(p => p.id === id);
+      const container = document.getElementById('screen-project');
 
-      list.innerHTML = projects.map(p => `
-        <div class="project-card" data-id="${p.id}">
-          <div class="pc-niche">${escHtml(p.niche)}</div>
-          <div class="pc-geo">${p.geo ? escHtml(p.geo) : 'Глобальный'}</div>
-          <div class="pc-meta">
-            <span class="pc-date">${new Date(p.created_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-            <span class="pc-status ${p.status}">${STATUS_LABELS[p.status] || p.status}</span>
+      if (!project) {
+        container.innerHTML = `
+          <div style="text-align:center; padding:80px 20px;">
+            <h2 style="color:#f85149; margin-bottom:16px;">Проект не найден</h2>
+            <p style="color:#8b949e; margin-bottom:20px;">Проект с этим ID не существует или был удалён.</p>
+            <button onclick="location.hash='#/'">Вернуться к проектам</button>
           </div>
-          <div class="pc-actions">
-            <button class="pc-open" onclick="openProject('${p.id}')">Открыть</button>
-            <button onclick="duplicateProject('${p.id}')">Дубл.</button>
-            <button class="pc-delete" onclick="deleteProject('${p.id}')">Удалить</button>
+        `;
+        return;
+      }
+
+      const dateStr = new Date(project.created_at).toLocaleDateString('ru-RU', {
+        day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit'
+      });
+      const updatedStr = new Date(project.updated_at || project.created_at).toLocaleDateString('ru-RU', {
+        day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit'
+      });
+      const hasHtml = !!project.html_content;
+
+      container.innerHTML = `
+        <div class="project-header">
+          <h1>${escHtml(project.niche)}</h1>
+          <div class="project-header-meta">
+            <span>${project.geo ? escHtml(project.geo) : 'Глобальный'}</span>
+            <span>·</span>
+            <span class="pc-status ${project.status}">${STATUS_LABELS[project.status] || project.status}</span>
+            <span>·</span>
+            <span>Создан: ${dateStr}</span>
+            <span>·</span>
+            <span>Обновлён: ${updatedStr}</span>
           </div>
         </div>
-      `).join('');
+
+        <div class="project-actions">
+          ${hasHtml ? `
+            <button onclick="projectOpenInEditor('${project.id}')" style="background:#238636; border-color:#238636; color:#fff;">Открыть в редакторе</button>
+            <button onclick="projectDownloadHtml('${project.id}')" style="background:#1f6feb; border-color:#1f6feb; color:#fff;">Скачать HTML</button>
+          ` : ''}
+          <button onclick="projectOpenInGenerator('${project.id}')">
+            ${project.status === 'in_progress' ? 'Продолжить генерацию' : 'Перегенерировать'}
+          </button>
+          <button onclick="duplicateProject('${project.id}'); location.hash='#/';">Дублировать</button>
+          <button onclick="if(confirm('Удалить проект?')){deleteProject('${project.id}'); location.hash='#/';}" style="color:#f85149;">Удалить</button>
+        </div>
+
+        ${hasHtml ? `
+          <iframe id="project-preview-iframe" class="project-preview-frame" sandbox="allow-scripts allow-same-origin"></iframe>
+        ` : `
+          <div style="text-align:center; padding:60px 20px; background:#161b22; border:1px solid #30363d; border-radius:12px;">
+            <p style="color:#8b949e; margin-bottom:16px;">Сайт ещё не сгенерирован</p>
+            <button onclick="projectOpenInGenerator('${project.id}')">Начать генерацию</button>
+          </div>
+        `}
+
+        <details class="project-meta-section">
+          <summary>Метаданные проекта ▾</summary>
+          <div class="project-meta-content">
+            <pre style="white-space:pre-wrap; word-break:break-all; font-size:12px; color:#8b949e;">ID: ${project.id}
+Ниша: ${project.niche}
+Гео: ${project.geo || '—'}
+Язык запросов: ${project.query_lang || 'Русский'}
+Язык сайта: ${project.site_lang || 'Русский'}
+Статус: ${project.status}
+Шаг пайплайна: ${project.meta?.currentStep || '—'}
+Компания: ${project.injection_name || '—'}
+Размер HTML: ${project.html_content ? (project.html_content.length / 1024).toFixed(1) + ' KB' : '—'}</pre>
+          </div>
+        </details>
+      `;
+
+      if (hasHtml) {
+        const iframe = container.querySelector('#project-preview-iframe');
+        setTimeout(() => { iframe.srcdoc = project.html_content; }, 0);
+      }
     }
+
+    // Project view actions
+    function projectOpenInEditor(id) {
+      const projects = getProjects();
+      const project = projects.find(p => p.id === id);
+      if (!project || !project.html_content) return showNotification('Нет HTML для редактирования', true);
+      currentProjectId = project.id;
+      canvasRawHtml = project.html_content;
+      openInEditor();
+    }
+
+    function projectDownloadHtml(id) {
+      const projects = getProjects();
+      const project = projects.find(p => p.id === id);
+      if (!project || !project.html_content) return showNotification('Нет HTML для скачивания', true);
+
+      const niche = project.niche || 'site';
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const filename = `rating-${niche.replace(/[^a-zA-Zа-яА-Я0-9]/g, '_')}-${dateStr}.html`;
+      const blob = new Blob([project.html_content], { type: 'text/html; charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function projectOpenInGenerator(id) {
+      openProject(id);
+      location.hash = '#/generator';
+    }
+
+    // loadProjects() — deprecated, projects now rendered by renderDashboard()
+    function loadProjects() {}
 
     function escHtml(str) {
       const d = document.createElement('div');
       d.textContent = str;
       return d.innerHTML;
-    }
-
-    function toggleProjectsList() {
-      const list = document.getElementById('projects-list');
-      const arrow = document.getElementById('projects-arrow');
-      const isHidden = list.style.display === 'none';
-      list.style.display = isHidden ? 'grid' : 'none';
-      arrow.classList.toggle('open', isHidden);
-      if (isHidden) loadProjects();
     }
 
     function createProject() {
@@ -1208,7 +1499,9 @@
 
       projects.unshift(copy);
       saveProjects(projects);
-      loadProjects();
+
+      const hash = location.hash || '#/';
+      if (hash === '#/' || hash === '#') renderDashboard();
       showNotification('Проект дублирован');
     }
 
@@ -1220,7 +1513,10 @@
       saveProjects(projects);
 
       if (currentProjectId === id) currentProjectId = null;
-      loadProjects();
+
+      const hash = location.hash || '#/';
+      if (hash === '#/' || hash === '#') renderDashboard();
+      if (hash === `#/project/${id}`) location.hash = '#/';
       showNotification('Проект удалён');
     }
 
@@ -1775,6 +2071,18 @@ SCHEMA.ORG: Не дублируй JSON-LD сущности. Question — тол�
           document.getElementById("canvas-section").scrollIntoView({ behavior: "smooth" });
           saveState(); // Save after fill template
           updateProjectStatus('filled', canvasRawHtml);
+
+          // Show "Go to project" button
+          if (currentProjectId) {
+            const existingGoBtn = document.getElementById('go-to-project-fill-btn');
+            if (existingGoBtn) existingGoBtn.remove();
+            const goBtn = document.createElement('button');
+            goBtn.id = 'go-to-project-fill-btn';
+            goBtn.textContent = 'Перейти к проекту →';
+            goBtn.style.cssText = 'margin-top:12px; width:100%; background:#1f6feb; border-color:#1f6feb;';
+            goBtn.onclick = () => { location.hash = `#/project/${currentProjectId}`; goBtn.remove(); };
+            document.getElementById('fill-section-wrap').querySelector('.result-card > div').appendChild(goBtn);
+          }
         }
       } catch (err) {
         fillLoading.innerHTML = `<div class="error-text" style="padding:20px;">[Ошибка] ${err.message}</div>`;
@@ -3587,17 +3895,29 @@ ${compilerRawXml}`;
 
       btn.disabled = false;
       btn.textContent = "Найти компании";
+
+      // Show "Go to project" button
+      if (currentProjectId) {
+        const existingGoBtn = document.getElementById('go-to-project-btn');
+        if (existingGoBtn) existingGoBtn.remove();
+        const goBtn = document.createElement('button');
+        goBtn.id = 'go-to-project-btn';
+        goBtn.textContent = 'Перейти к проекту →';
+        goBtn.style.cssText = 'margin-top:8px; width:100%; background:#1f6feb; border-color:#1f6feb;';
+        goBtn.onclick = () => { location.hash = `#/project/${currentProjectId}`; goBtn.remove(); };
+        btn.parentElement.appendChild(goBtn);
+      }
     }
 
     // Restore saved API key
     const savedKey = localStorage.getItem("openrouter_key");
     if (savedKey) document.getElementById("apiKey").value = savedKey;
 
-    // Restore pipeline state from localStorage
+    // Restore pipeline state from localStorage (Generator crash recovery)
     loadState();
 
-    // Load projects list from Supabase
-    loadProjects();
+    // Start SPA router
+    router();
   </script>
 </body>
 </html>
