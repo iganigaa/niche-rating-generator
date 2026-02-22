@@ -65,8 +65,27 @@
       transition: border-color 0.2s;
     }
 
-    input:focus {
+    input:focus, select:focus {
       border-color: #58a6ff;
+    }
+
+    select {
+      padding: 12px 16px;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      background: #161b22;
+      color: #e1e4e8;
+      font-size: 15px;
+      outline: none;
+      transition: border-color 0.2s;
+      cursor: pointer;
+    }
+
+    .field-hint {
+      font-size: 12px;
+      color: #888;
+      margin-top: 2px;
+      line-height: 1.4;
     }
 
     .prompt-preview {
@@ -487,11 +506,47 @@
       <div class="input-group">
         <label>Название ниши</label>
         <input type="text" id="niche" placeholder="например: кибербезопасность" oninput="updatePreview()" />
+        <span class="field-hint">Укажите нишу или тематику для поиска компаний. Пример: аренда авто, кибербезопасность</span>
       </div>
 
       <div class="input-group">
-        <label>Гео <span style="color:#8b949e; font-weight:400;">(необязательно)</span></label>
+        <label>Гео ниши <span style="color:#8b949e; font-weight:400;">(необязательно)</span></label>
         <input type="text" id="geo" placeholder="например: Москва, Россия, Казахстан..." oninput="updatePreview()" />
+        <span class="field-hint">Где работают компании. Оставьте пустым для глобального поиска. Пример: Калифорния, Москва</span>
+      </div>
+
+      <div class="input-group">
+        <label>Гео запроса <span style="color:#8b949e; font-weight:400;">(необязательно)</span></label>
+        <input type="text" id="geoRequest" placeholder="например: Москва, New York..." />
+        <span class="field-hint">Откуда вы ищете — влияет на релевантность выдачи с учётом вашей локации. Пример: Москва, New York</span>
+      </div>
+
+      <div class="input-group">
+        <label>Язык запросов</label>
+        <select id="queryLang">
+          <option value="Русский">Русский</option>
+          <option value="English">English</option>
+          <option value="Deutsch">Deutsch</option>
+          <option value="Français">Français</option>
+          <option value="Español">Español</option>
+          <option value="中文">中文</option>
+          <option value="日本語">日本語</option>
+        </select>
+        <span class="field-hint">На каком языке модели будут искать и анализировать компании</span>
+      </div>
+
+      <div class="input-group">
+        <label>Язык сайта</label>
+        <select id="siteLang">
+          <option value="Русский">Русский</option>
+          <option value="English">English</option>
+          <option value="Deutsch">Deutsch</option>
+          <option value="Français">Français</option>
+          <option value="Español">Español</option>
+          <option value="中文">中文</option>
+          <option value="日本語">日本語</option>
+        </select>
+        <span class="field-hint">На каком языке будет сгенерирован итоговый рейтинговый сайт</span>
       </div>
 
       <div class="prompt-preview" id="preview">
@@ -627,9 +682,9 @@
 
   <script>
     const MODELS = [
-      { id: "openai/gpt-4o", name: "ChatGPT (GPT-4o)" },
-      { id: "google/gemini-2.0-flash-001", name: "Gemini 2.0 Flash" },
-      { id: "anthropic/claude-sonnet-4", name: "Claude (Sonnet 4)" },
+      { id: "openai/gpt-5", name: "ChatGPT (GPT-5)" },
+      { id: "google/gemini-3-pro-preview", name: "Gemini 3 Pro" },
+      { id: "anthropic/claude-sonnet-4.5", name: "Claude (Sonnet 4.5)" },
     ];
 
     // Conversation history per model: { [modelId]: [{role, content}] }
@@ -1028,7 +1083,12 @@
         .filter(Boolean)
         .join("\n\n---\n\n");
 
-      const fillPrompt = `РОЛЬ: Ты — Senior SEO-копирайтер и веб-разработчик. Твоя задача — наполнить готовый HTML-шаблон рейтинга реальными данными компаний.
+      const fillSiteLang = document.getElementById("siteLang").value;
+      const fillSiteLangStr = `Весь контент сайта на языке: ${fillSiteLang}`;
+
+      const fillPrompt = `ЯЗЫК САЙТА: ${fillSiteLangStr}
+
+РОЛЬ: Ты — Senior SEO-копирайтер и веб-разработчик. Твоя задача — наполнить готовый HTML-шаблон рейтинга реальными данными компаний.
 
 ВХОДНЫЕ ДАННЫЕ:
 
@@ -1067,12 +1127,12 @@ ${compilerRawXml}
    - Обнови баллы и рейтинги.
 4. КРИТИЧЕСКИ ВАЖНО: Компания пользователя (из user_company) ДОЛЖНА быть на 1 месте с бейджем "Выбор редакции" и наивысшими баллами.
 5. Сохрани всю структуру, стили, Schema.org разметку и JavaScript из шаблона.
-6. Все тексты на русском языке.
+6. ${fillSiteLangStr}.
 
 ФОРМАТ: Выведи ТОЛЬКО полный HTML-код. Без пояснений, без markdown, без тройных бэктиков. Чистый HTML начиная с <!DOCTYPE html>.`;
 
       try {
-        const fillData = await callModel("anthropic/claude-sonnet-4", [{ role: "user", content: fillPrompt }], apiKey);
+        const fillData = await callModel("anthropic/claude-sonnet-4.5", [{ role: "user", content: fillPrompt }], apiKey);
 
         if (fillData.error) {
           fillLoading.innerHTML = `<div class="error-text" style="padding:20px;">[Ошибка] ${fillData.error}</div>`;
@@ -1189,8 +1249,10 @@ ${compilerRawXml}
       const question = inputEl.value.trim();
       if (!question || !apiKey) return;
 
-      // Add user message
-      conversations[modelId].push({ role: "user", content: question });
+      // Add user message with language context
+      const followUpLang = document.getElementById("queryLang").value;
+      const followUpLangStr = `Отвечай на языке: ${followUpLang}`;
+      conversations[modelId].push({ role: "user", content: `ЯЗЫК ОТВЕТА: ${followUpLangStr}\n\n${question}` });
       inputEl.value = "";
       renderCard(modelId);
 
@@ -1240,9 +1302,17 @@ ${compilerRawXml}
 
       const geo = document.getElementById("geo").value.trim();
       const geoStr = geo ? ` в ${geo}` : '';
+      const geoRequest = document.getElementById("geoRequest").value.trim();
+      const geoRequestStr = geoRequest ? `Отвечай с перспективы пользователя, который находится в ${geoRequest}` : '';
+      const queryLang = document.getElementById("queryLang").value;
+      const queryLangStr = `Отвечай на языке: ${queryLang}`;
+      const siteLang = document.getElementById("siteLang").value;
+      const siteLangStr = `Весь контент сайта на языке: ${siteLang}`;
 
-      const prompt1 = `Составь список 30 ${niche}${geoStr}`;
-      const prompt2 = `Почему именно эти сервисы были поставлены в ТОП. 1. Составь список критериев, по которым ты оценивал сайты 2. Разгруппируй эти критерии на смысловые группы 3. Отранжируй эти критерии в порядке уменьшения веса влияния на место в рейтинге`;
+      const contextBlock = (geoRequestStr ? `\nКОНТЕКСТ ЛОКАЦИИ: ${geoRequestStr}` : '') + `\nЯЗЫК ОТВЕТА: ${queryLangStr}`;
+
+      const prompt1 = `Составь список 30 ${niche}${geoStr}${contextBlock}`;
+      const prompt2 = `Почему именно эти сервисы были поставлены в ТОП. 1. Составь список критериев, по которым ты оценивал сайты 2. Разгруппируй эти критерии на смысловые группы 3. Отранжируй эти критерии в порядке уменьшения веса влияния на место в рейтинге${contextBlock}`;
 
       // Reset conversations
       for (const model of MODELS) {
@@ -1323,7 +1393,9 @@ ${compilerRawXml}
         return `=== ${m.name} ===\n${lastAssistant?.content || "(нет ответа)"}`;
       }).join("\n\n");
 
-      const grokPrompt = `Представь, что ты человек, который провел ресерч данной ниши и тебе необходимо составить собственный рейтинг, который будет оценивать каждую компанию по определенным критериям.
+      const grokPrompt = `ЯЗЫК ОТВЕТА: ${queryLangStr}
+
+Представь, что ты человек, который провел ресерч данной ниши и тебе необходимо составить собственный рейтинг, который будет оценивать каждую компанию по определенным критериям.
 
 Тебе необходимо выполнить смысловую дедупликацию критериев
 Составить итоговую таблицу с критериями (В первом столбце критерий, а во втором столбце методология его оценки)
@@ -1343,7 +1415,7 @@ ${criteriaBlocks}
       grokSection.scrollIntoView({ behavior: "smooth" });
 
       try {
-        const grokData = await callModel("x-ai/grok-3-mini-beta", [{ role: "user", content: grokPrompt }], apiKey);
+        const grokData = await callModel("x-ai/grok-4", [{ role: "user", content: grokPrompt }], apiKey);
         if (grokData.error) {
           grokMessages.innerHTML = `<div class="chat-msg chat-msg-assistant"><div class="chat-msg-label">Grok</div><div class="error-text">[Ошибка] ${grokData.error}</div></div>`;
         } else {
@@ -1364,7 +1436,9 @@ ${criteriaBlocks}
       // --- Запрос 4: Аудитории и боли ---
       btn.textContent = "Анализ аудиторий (Grok)...";
 
-      const audiencePrompt = `Ты — маркетолог-аналитик и UX-специалист. Тебе дана ниша: "${niche}".
+      const audiencePrompt = `ЯЗЫК ОТВЕТА: ${queryLangStr}
+
+Ты — маркетолог-аналитик и UX-специалист. Тебе дана ниша: "${niche}".
 
 Смоделируй 4 сегмента целевой аудитории для компаний в этой нише.
 
@@ -1395,7 +1469,7 @@ ${criteriaBlocks}
       audienceSection.scrollIntoView({ behavior: "smooth" });
 
       try {
-        const audData = await callModel("x-ai/grok-3-mini-beta", [{ role: "user", content: audiencePrompt }], apiKey);
+        const audData = await callModel("x-ai/grok-4", [{ role: "user", content: audiencePrompt }], apiKey);
         if (audData.error) {
           audienceMessages.innerHTML = `<div class="chat-msg chat-msg-assistant"><div class="chat-msg-label">Grok</div><div class="error-text">[Ошибка] ${audData.error}</div></div>`;
         } else {
@@ -1421,7 +1495,9 @@ ${criteriaBlocks}
       // --- Запрос 5: Компилятор критериев (Claude) ---
       btn.textContent = "Компиляция XML-структуры (Claude)...";
 
-      const compilerPrompt = `Сейчас мы будем компилировать следующие данные:
+      const compilerPrompt = `ЯЗЫК ОТВЕТА: ${queryLangStr}
+
+Сейчас мы будем компилировать следующие данные:
 
 === ИТОГОВЫЙ АНАЛИЗ КРИТЕРИЕВ ===
 ${grokCriteriaRaw}
@@ -1454,7 +1530,7 @@ ${grokAudienceRaw}
       compSection.scrollIntoView({ behavior: "smooth" });
 
       try {
-        const compData = await callModel("anthropic/claude-sonnet-4", [{ role: "user", content: compilerPrompt }], apiKey);
+        const compData = await callModel("anthropic/claude-sonnet-4.5", [{ role: "user", content: compilerPrompt }], apiKey);
         if (compData.error) {
           compMessages.innerHTML = `<div class="chat-msg chat-msg-assistant"><div class="chat-msg-label">Claude</div><div class="error-text">[Ошибка] ${compData.error}</div></div>`;
         } else {
@@ -1472,7 +1548,9 @@ ${grokAudienceRaw}
       // --- Запрос 6: Генерация сайта (Claude) ---
       btn.textContent = "Генерация сайта (Claude)...";
 
-      const sitePrompt = `РОЛЬ:
+      const sitePrompt = `ЯЗЫК САЙТА: ${siteLangStr}
+
+РОЛЬ:
 
 Ты — Senior SEO-специалист, эксперт по GEO (Generative Engine Optimization) и Fullstack-разработчик.
 Твоя задача — создать независимый рейтинговый портал (агрегатор) по теме "${niche}"${geoStr}.
@@ -1636,7 +1714,7 @@ ${compilerRawXml}`;
       canvasSection.scrollIntoView({ behavior: "smooth" });
 
       try {
-        const siteData = await callModel("anthropic/claude-sonnet-4", [{ role: "user", content: sitePrompt }], apiKey);
+        const siteData = await callModel("anthropic/claude-sonnet-4.5", [{ role: "user", content: sitePrompt }], apiKey);
 
         if (siteData.error) {
           canvasLoading.innerHTML = `<div class="error-text" style="padding:20px;">[Ошибка] ${siteData.error}</div>`;
@@ -1674,7 +1752,9 @@ ${compilerRawXml}`;
       document.getElementById('ratings-progress').textContent = '';
       ratingsSection.scrollIntoView({ behavior: "smooth" });
 
-      const perplexityPrompt = `Найди 10-15 лучших рейтингов и обзоров компаний по теме "${niche}"${geoStr} в русскоязычном интернете.
+      const perplexityPrompt = `${geoRequestStr ? 'КОНТЕКСТ ЛОКАЦИИ: ' + geoRequestStr + '\n' : ''}ЯЗЫК ОТВЕТА: ${queryLangStr}
+
+Найди 10-15 лучших рейтингов и обзоров компаний по теме "${niche}"${geoStr} в интернете.
 
 Для каждого рейтинга укажи:
 - Название статьи/сайта
@@ -1756,7 +1836,9 @@ ${compilerRawXml}`;
         return `=== ${m.name} ===\n${firstAssistant?.content || "(нет ответа)"}`;
       }).join("\n\n");
 
-      const extractPrompt = `Из текста ниже извлеки все уникальные компании. Для каждой компании определи название и URL основного сайта.
+      const extractPrompt = `ЯЗЫК ОТВЕТА: ${queryLangStr}
+
+Из текста ниже извлеки все уникальные компании. Для каждой компании определи название и URL основного сайта.
 
 ПРАВИЛА:
 1. Объедини дубликаты (одна и та же компания от разных моделей = одна запись).
@@ -1773,7 +1855,7 @@ ${step1Responses}`;
       document.getElementById('download-progress').textContent = 'AI извлекает список компаний и URL...';
 
       try {
-        const extractData = await callModel("anthropic/claude-sonnet-4", [{ role: "user", content: extractPrompt }], apiKey);
+        const extractData = await callModel("anthropic/claude-sonnet-4.5", [{ role: "user", content: extractPrompt }], apiKey);
 
         if (extractData.error) {
           document.getElementById('download-progress').textContent = `Ошибка извлечения: ${extractData.error}`;

@@ -1,0 +1,326 @@
+{
+  "$schema": "prompt-chain/v2",
+  "meta": {
+    "project": "Генератор прототипов",
+    "description": "AI-пайплайн для создания рейтинговых сайтов компаний по нише через многошаговую оркестрацию 5 моделей",
+    "analyzed_at": "2026-02-22T00:00:00Z",
+    "total_instruments": 2,
+    "total_steps": 12,
+    "models_used": [
+      "openai/gpt-5",
+      "google/gemini-3-pro-preview",
+      "anthropic/claude-sonnet-4.5",
+      "x-ai/grok-4",
+      "perplexity/sonar-pro"
+    ]
+  },
+
+  "instruments": [
+    {
+      "id": "instrument_1",
+      "name": "Генератор рейтингового сайта",
+      "description": "Основной инструмент: генерирует рейтинговый портал с реальными данными компаний через 10-шаговый AI-пайплайн (3 модели × 2 промпта → Grok критерии → Grok аудитории → Claude XML → Claude сайт → Perplexity рейтинги → скрапинг → наполнение)",
+      "entry_file": "public/index.html",
+      "variables": {
+        "niche": { "source": "user_input", "description": "Название ниши (например: кибербезопасность)" },
+        "geo": { "source": "user_input", "description": "Географическое ограничение (необязательно, например: Москва)" },
+        "apiKey": { "source": "user_input", "description": "API-ключ OpenRouter (сохраняется в localStorage)" },
+        "userCompanyData": { "source": "user_input", "description": "Данные компании пользователя для позиции #1 в рейтинге (вводятся на шаге наполнения)" }
+      },
+
+      "flows": [
+        {
+          "id": "main_pipeline",
+          "name": "Основной пайплайн генерации",
+          "description": "Полный цикл: 3 модели × 2 промпта → Grok дедупликация критериев → Grok сегменты ЦА → Claude XML-компилятор → Claude HTML-генератор → Perplexity поиск рейтингов → скачивание рейтингов → Claude извлечение компаний → скачивание сайтов",
+          "default": true,
+          "condition": null,
+          "nodes": [
+            {
+              "id": "step_1",
+              "label": "Генерация списков компаний",
+              "type": "llm_call",
+              "execution": "parallel",
+              "trigger": "auto",
+              "models": ["openai/gpt-5", "google/gemini-3-pro-preview", "anthropic/claude-sonnet-4.5"],
+              "prompt_template": "Запрос к 3 моделям на составление списка 30 компаний в заданной нише с учётом гео",
+              "prompt_raw": "Составь список 30 ${niche}${geoStr}",
+              "inputs": ["niche", "geo"],
+              "outputs": ["company_lists"],
+              "output_var": "conversations[model.id][1].content",
+              "description": "Один и тот же промпт параллельно отправляется в ChatGPT, Gemini и Claude через OpenRouter. Каждая модель возвращает свой вариант списка 30 компаний.",
+              "position": { "x": 100, "y": 200 }
+            },
+            {
+              "id": "step_2",
+              "label": "Извлечение критериев рейтинга",
+              "type": "llm_call",
+              "execution": "parallel",
+              "trigger": "auto",
+              "models": ["openai/gpt-5", "google/gemini-3-pro-preview", "anthropic/claude-sonnet-4.5"],
+              "prompt_template": "Запрос к моделям объяснить критерии ранжирования, сгруппировать и отранжировать по весу",
+              "prompt_raw": "Почему именно эти сервисы были поставлены в ТОП. 1. Составь список критериев, по которым ты оценивал сайты 2. Разгруппируй эти критерии на смысловые группы 3. Отранжируй эти критерии в порядке уменьшения веса влияния на место в рейтинге",
+              "inputs": ["step_1"],
+              "outputs": ["criteria_per_model"],
+              "output_var": "conversations[model.id][3].content",
+              "description": "Второй запрос к тем же 3 моделям (с контекстом первого ответа). Каждая модель объясняет и группирует свои критерии ранжирования по весу влияния.",
+              "position": { "x": 400, "y": 200 }
+            },
+            {
+              "id": "step_3",
+              "label": "Дедупликация критериев (Grok)",
+              "type": "llm_call",
+              "execution": "sequential",
+              "trigger": "auto",
+              "models": ["x-ai/grok-4"],
+              "prompt_template": "Смысловая дедупликация критериев от 3 моделей в единую таблицу «Критерий | Методология оценки»",
+              "prompt_raw": "Представь, что ты человек, который провел ресерч данной ниши и тебе необходимо составить собственный рейтинг, который будет оценивать каждую компанию по определенным критериям.\n\nТебе необходимо выполнить смысловую дедупликацию критериев\nСоставить итоговую таблицу с критериями (В первом столбце критерий, а во втором столбце методология его оценки)\nПри разборе запрещается пропускать критерии\n\nВАЖНО: В ответе выведи ТОЛЬКО итоговую таблицу. Без вступления, без пояснений, без заключения. Только таблица.\n\nСписок критериев ниже:\n<data>\n${criteriaBlocks}\n</data>",
+              "inputs": ["step_2"],
+              "outputs": ["grokCriteriaRaw"],
+              "output_var": "grokCriteriaRaw",
+              "description": "Grok анализирует критерии от всех 3 моделей, убирает смысловые дубликаты и формирует единую markdown-таблицу «Критерий | Методология оценки». Результат рендерится как HTML-таблица.",
+              "position": { "x": 700, "y": 200 }
+            },
+            {
+              "id": "step_4",
+              "label": "Анализ аудиторий и болей (Grok)",
+              "type": "llm_call",
+              "execution": "sequential",
+              "trigger": "auto",
+              "models": ["x-ai/grok-4"],
+              "prompt_template": "Моделирование 4 сегментов ЦА с 15-20 болями/интентами каждый + портреты",
+              "prompt_raw": "Ты — маркетолог-аналитик и UX-специалист. Тебе дана ниша: \"${niche}\".\n\nСмоделируй 4 сегмента целевой аудитории для компаний в этой нише.\n\nДля каждого сегмента ЦА составь подробный список их боле[...TRUNCATED...]---\n**Малый бизнес:** Владелец компании до 50 чел., ищет автоматизацию...\n**Корпорации:** IT-директор крупной компании...\n\nБез вступления и заключения.",
+              "inputs": ["niche"],
+              "outputs": ["grokAudienceRaw"],
+              "output_var": "grokAudienceRaw",
+              "description": "Grok генерирует 4 сегмента целевой аудитории с 15-20 болями/интентами каждый в виде markdown-таблицы (ЦА | Боль/Интент) + краткие портреты каждого сегмента. Результат парсится в HTML-таблицу + блок портретов.",
+              "position": { "x": 1000, "y": 200 }
+            },
+            {
+              "id": "step_5",
+              "label": "Компиляция XML-структуры критериев",
+              "type": "llm_call",
+              "execution": "sequential",
+              "trigger": "auto",
+              "models": ["anthropic/claude-sonnet-4.5"],
+              "prompt_template": "Компиляция критериев и данных ЦА в структурированный XML: 4-5 групп по 5-8 критериев с методологией, рекомендациями, примерами",
+              "prompt_raw": "Сейчас мы будем компилировать следующие данные:\n\n=== ИТОГОВЫЙ АНАЛИЗ КРИТЕРИЕВ ===\n${grokCriteriaRaw}\n\n=== АУДИТОРИИ И ИХ БОЛИ / ИНТЕНТЫ ===\n${grokAudienceRaw}\n\nЭто делается для того, чтобы сдела[...TRUNCATED...]4. Придумай реалистичные метрики и примеры, основываясь на типичных значениях для отрасли \"${niche}\".\n5. Выводи ТОЛЬКО XML-структуру без лишнего текста. Оберни весь вывод в <criteria_structure> ... </criteria_structure>.",
+              "inputs": ["step_3", "step_4", "niche"],
+              "outputs": ["compilerRawXml"],
+              "output_var": "compilerRawXml",
+              "description": "Claude объединяет критерии от Grok и данные об аудиториях в XML-структуру: <criteria_structure> с <group> (4-5 групп) и <criterion> (5-8 в каждой). Каждый критерий содержит name, description, methodology, why_important, recommendation, target, example.",
+              "position": { "x": 1300, "y": 200 }
+            },
+            {
+              "id": "step_6",
+              "label": "Генерация HTML-сайта рейтинга",
+              "type": "llm_call",
+              "execution": "sequential",
+              "trigger": "auto",
+              "models": ["anthropic/claude-sonnet-4.5"],
+              "prompt_template": "Генерация полного SEO/GEO-оптимизированного HTML-сайта рейтинга: Schema.org, E-E-A-T, TOP-5 карточки, Chart.js, FAQ",
+              "prompt_raw": "РОЛЬ:\n\nТы — Senior SEO-специалист, эксперт по GEO (Generative Engine Optimization) и Fullstack-разработчик.\nТвоя задача — создать независимый рейтинговый портал (агрегатор) по теме \"${niche}\"${geoStr}.\n\nЦЕЛЬ:\n\nСоздать единую, полностью самодостаточную HTML-страницу (один файл, inline CSS и JS), которая:\n\nИдеально ранжируется по запросам[...TRUNCATED...]4. ВЕСЬ КОД В ОДНОМ HTML-ФАЙЛЕ. Inline styles и scripts допустимы.\n\n5. Выведи ТОЛЬКО HTML-код. Без пояснений, без markdown, без тройных бэктиков. Просто чистый HTML начиная с <!DOCTYPE html>.\n\nВХОДНЫЕ ДАННЫЕ (XML):\n\n${compilerRawXml}",
+              "inputs": ["step_5", "niche", "geo"],
+              "outputs": ["canvasRawHtml"],
+              "output_var": "canvasRawHtml",
+              "description": "Claude генерирует полный самодостаточный HTML-файл рейтингового сайта: Hero-блок + Методология + TOP-5 расширенные карточки (Schema.org/Product) + компактная таблица 6+ + аналитика (Chart.js CDN) + SEO-лонгрид + FAQ (FAQPage) + авторство (Person). Используется Tailwind CSS CDN, Inter шрифт.",
+              "position": { "x": 1600, "y": 200 }
+            },
+            {
+              "id": "step_7",
+              "label": "Поиск рейтинговых сайтов (Perplexity)",
+              "type": "llm_call",
+              "execution": "sequential",
+              "trigger": "auto",
+              "models": ["perplexity/sonar-pro"],
+              "prompt_template": "Поиск 10-15 существующих рейтингов и обзоров компаний в русскоязычном интернете с URL",
+              "prompt_raw": "Найди 10-15 лучших рейтингов и обзоров компаний по теме \"${niche}\"${geoStr} в русскоязычном интернете.\n\nДля каждого рейтинга укажи:\n- Название статьи/сайта\n- Прямой URL страницы рейтинга\n\nИщи именно страницы-рейтинги, обзоры, сравнения, ТОП-листы — где уже собрана структурированная информация о компаниях данной ниши.\n\nВАЖНО: Верни ТОЛЬКО JSON-массив и НИЧЕГО больше. Без markdown, без пояснений, без бэктиков.\nФормат:\n[{\"name\": \"Название рейтинга\", \"url\": \"https://...\"}]",
+              "inputs": ["niche", "geo"],
+              "outputs": ["extractedRatings"],
+              "output_var": "extractedRatings",
+              "description": "Perplexity ищет в интернете существующие рейтинги и обзоры компаний по нише. Возвращает JSON-массив [{name, url}]. Результат дедуплицируется по домену и используется для скачивания рейтинговых страниц.",
+              "position": { "x": 1900, "y": 200 }
+            },
+            {
+              "id": "step_7_web",
+              "label": "Скачивание рейтинговых сайтов",
+              "type": "web_fetch",
+              "execution": "parallel",
+              "trigger": "auto",
+              "models": [],
+              "prompt_template": "Параллельное скачивание HTML-страниц рейтинговых сайтов через CORS-прокси (до 5 потоков)",
+              "prompt_raw": "",
+              "inputs": ["step_7"],
+              "outputs": ["downloadedRatings"],
+              "output_var": "downloadedRatings",
+              "description": "Скачивание HTML-страниц найденных рейтингов через 3 CORS-прокси (codetabs → allorigins → corsproxy). Извлечение текста (до 8000 символов). 5 параллельных потоков, таймаут 15 сек на прокси. Результат — основной источник фактов для наполнения шаблона.",
+              "position": { "x": 2200, "y": 200 }
+            },
+            {
+              "id": "step_8",
+              "label": "Извлечение компаний и URL",
+              "type": "llm_call",
+              "execution": "sequential",
+              "trigger": "auto",
+              "models": ["anthropic/claude-sonnet-4.5"],
+              "prompt_template": "Извлечение уникальных компаний с URL из ответов 3 моделей, дедупликация по названию",
+              "prompt_raw": "Из текста ниже извлеки все уникальные компании. Для каждой компании определи название и URL основного сайта.\n\nПРАВИЛА:\n1. Объедини дубликаты (одна и та же компания от разных моделей = одна запись).[...TRUNCATED...]Формат ответа (строго JSON):\n[{\"name\": \"Company Name\", \"url\": \"https://example.com\"}, ...]\n\nТекст:\n${step1Responses}",
+              "inputs": ["step_1"],
+              "outputs": ["extractedCompanies"],
+              "output_var": "extractedCompanies",
+              "description": "Claude анализирует ответы 3 моделей (первые ответы с шага 1), извлекает все упомянутые компании, определяет их URL-адреса и возвращает дедуплицированный JSON-массив [{name, url}].",
+              "position": { "x": 2500, "y": 200 }
+            },
+            {
+              "id": "step_8_web",
+              "label": "Скачивание сайтов компаний",
+              "type": "web_fetch",
+              "execution": "parallel",
+              "trigger": "auto",
+              "models": [],
+              "prompt_template": "Параллельное скачивание сайтов компаний через CORS-прокси (до 5 потоков)",
+              "prompt_raw": "",
+              "inputs": ["step_8"],
+              "outputs": ["downloadedSites"],
+              "output_var": "downloadedSites",
+              "description": "Скачивание HTML-страниц сайтов компаний через CORS-прокси. Извлечение текста (до 8000 символов). 5 параллельных потоков. Результат — дополнительный источник данных для наполнения шаблона.",
+              "position": { "x": 2800, "y": 200 }
+            }
+          ],
+          "edges": [
+            { "from": "step_1", "to": "step_2", "label": "conversations (контекст чата)", "type": "context" },
+            { "from": "step_2", "to": "step_3", "label": "criteriaBlocks (последние ответы моделей)", "type": "data" },
+            { "from": "step_3", "to": "step_4", "label": "", "type": "trigger" },
+            { "from": "step_3", "to": "step_5", "label": "grokCriteriaRaw", "type": "data" },
+            { "from": "step_4", "to": "step_5", "label": "grokAudienceRaw", "type": "data" },
+            { "from": "step_5", "to": "step_6", "label": "compilerRawXml", "type": "data" },
+            { "from": "step_6", "to": "step_7", "label": "", "type": "trigger" },
+            { "from": "step_7", "to": "step_7_web", "label": "extractedRatings (массив URL)", "type": "data" },
+            { "from": "step_7_web", "to": "step_8", "label": "", "type": "trigger" },
+            { "from": "step_1", "to": "step_8", "label": "step1Responses (первые ответы моделей)", "type": "data" },
+            { "from": "step_8", "to": "step_8_web", "label": "extractedCompanies (массив URL)", "type": "data" }
+          ]
+        },
+
+        {
+          "id": "fill_template",
+          "name": "Наполнение шаблона данными",
+          "description": "Наполнение сгенерированного HTML-шаблона реальными данными: рейтинговые сайты (приоритет) + сайты компаний + данные пользователя (#1) + XML-критерии",
+          "default": false,
+          "condition": "Кнопка 'Наполнить контентом' нажата && canvasRawHtml существует && скачаны сайты",
+          "nodes": [
+            {
+              "id": "step_fill",
+              "label": "Наполнение шаблона реальными данными",
+              "type": "llm_call",
+              "execution": "sequential",
+              "trigger": "manual_button",
+              "condition": "canvasRawHtml && extractedCompanies.filter(c => c.status === 'done').length > 0",
+              "models": ["anthropic/claude-sonnet-4.5"],
+              "prompt_template": "Senior SEO-копирайтер заполняет HTML-шаблон реальными данными компаний: рейтинговые сайты (до 60K символов), сайты компаний (до 40K), данные пользователя → #1, XML-критерии",
+              "prompt_raw": "РОЛЬ: Ты — Senior SEO-копирайтер и веб-разработчик. Твоя задача — наполнить готовый HTML-шаблон рейтинга реальными данными компаний.\n\nВХОДНЫЕ ДАННЫЕ:\n\n1. HTML-ШАБЛОН САЙТА:\n<template>\n${canvasRawH[...TRUNCATED...]4. КРИТИЧЕСКИ ВАЖНО: Компания пользователя (из user_company) ДОЛЖНА быть на 1 месте с бейджем \"Выбор редакции\" и наивысшими баллами.\n5. Сохрани всю структуру, стили, Schema.org разметку и JavaScript из шаблона.\n6. Все тексты на русском языке.\n\nФОРМАТ: Выведи ТОЛЬКО полный HTML-код. Без пояснений, без markdown, без тройных бэктиков. Чистый HTML начиная с <!DOCTYPE html>.",
+              "inputs": ["canvasRawHtml", "downloadedRatings", "downloadedSites", "userCompanyData", "compilerRawXml"],
+              "outputs": ["canvasRawHtml (обновлённый)"],
+              "output_var": "canvasRawHtml",
+              "description": "Claude берёт HTML-шаблон (step_6) и заполняет его реальными данными. Приоритет: рейтинговые сайты (до 60K символов, до 8K на сайт) → сайты компаний (до 40K, до 5K на первые 10 и 2K на остальные). Компания пользователя принудительно ставится на 1 место. Результат перезаписывает canvasRawHtml и обновляет iframe.",
+              "position": { "x": 100, "y": 200 }
+            }
+          ],
+          "edges": []
+        },
+
+        {
+          "id": "follow_up_chat",
+          "name": "Дополнительный чат с моделями",
+          "description": "Интерактивный многотурный чат с любой из 3 начальных моделей для уточняющих вопросов",
+          "default": false,
+          "condition": "Пользователь вводит сообщение в чат-инпут любой модели",
+          "nodes": [
+            {
+              "id": "step_followup",
+              "label": "Чат-запрос к модели",
+              "type": "llm_call",
+              "execution": "sequential",
+              "trigger": "manual_button",
+              "models": ["openai/gpt-5", "google/gemini-3-pro-preview", "anthropic/claude-sonnet-4.5"],
+              "prompt_template": "Произвольный вопрос пользователя в выбранную модель с полной историей multi-turn чата",
+              "prompt_raw": "${userQuestion} (с полным контекстом conversations[modelId])",
+              "inputs": ["conversations[modelId]", "userQuestion"],
+              "outputs": ["assistant_response"],
+              "output_var": "conversations[modelId].push({role: 'assistant', content})",
+              "description": "Пользователь может задать произвольный вопрос любой из 3 моделей. Используется полная история диалога (multi-turn). Ответ отображается в чат-карточке модели.",
+              "position": { "x": 100, "y": 200 }
+            }
+          ],
+          "edges": []
+        }
+      ]
+    },
+
+    {
+      "id": "instrument_2",
+      "name": "API-сервер (Legacy)",
+      "description": "Express.js сервер (server.js). Содержит 2 эндпоинта для вызова LLM через OpenRouter. В текущей версии НЕ используется фронтендом — фронтенд вызывает OpenRouter API напрямую через callModel(). Сервер используется только для раздачи статических файлов.",
+      "entry_file": "server.js",
+      "variables": {
+        "niche": { "source": "request_body", "description": "Название ниши (POST body)" },
+        "apiKey": { "source": "request_body", "description": "API-ключ OpenRouter (POST body)" },
+        "modelId": { "source": "request_body", "description": "ID модели для /api/chat (POST body)" },
+        "messages": { "source": "request_body", "description": "Массив сообщений для /api/chat (POST body)" }
+      },
+
+      "flows": [
+        {
+          "id": "server_search",
+          "name": "Поиск компаний через SSE (Legacy)",
+          "description": "POST /api/search — отправляет промпт в 3 модели параллельно, стримит результаты через Server-Sent Events. Не используется фронтендом.",
+          "default": true,
+          "condition": null,
+          "nodes": [
+            {
+              "id": "step_server_1",
+              "label": "Поиск компаний через 3 модели (SSE)",
+              "type": "llm_call",
+              "execution": "parallel",
+              "trigger": "auto",
+              "models": ["openai/gpt-5", "google/gemini-3-pro-preview", "anthropic/claude-sonnet-4.5"],
+              "prompt_template": "Упрощённый запрос на список 30 компаний (без гео-параметра, без второго промпта)",
+              "prompt_raw": "Составь список 30 лучших компаний ${niche}",
+              "inputs": ["niche"],
+              "outputs": ["results (SSE stream)"],
+              "output_var": "results → res.write(SSE)",
+              "description": "Параллельная отправка одного промпта в 3 модели. Результаты стримятся через SSE (data: JSON). Упрощённая версия — только 1 промпт, без гео, без follow-up.",
+              "position": { "x": 100, "y": 200 }
+            }
+          ],
+          "edges": []
+        },
+        {
+          "id": "server_chat",
+          "name": "Прокси-чат с моделью (Legacy)",
+          "description": "POST /api/chat — пересылает произвольные сообщения в указанную модель OpenRouter. Не используется фронтендом.",
+          "default": false,
+          "condition": "POST /api/chat с телом {modelId, messages, apiKey}",
+          "nodes": [
+            {
+              "id": "step_server_chat",
+              "label": "Пересылка сообщений в модель",
+              "type": "llm_call",
+              "execution": "sequential",
+              "trigger": "auto",
+              "models": ["(указанная в запросе modelId)"],
+              "prompt_template": "Прокси-запрос: пересылка массива messages в указанную модель OpenRouter",
+              "prompt_raw": "${messages} (массив [{role, content}] от клиента)",
+              "inputs": ["modelId", "messages"],
+              "outputs": ["content"],
+              "output_var": "res.json({ content })",
+              "description": "Прокси-эндпоинт: принимает modelId и массив messages из POST body, пересылает в OpenRouter API, возвращает текстовый ответ модели.",
+              "position": { "x": 100, "y": 200 }
+            }
+          ],
+          "edges": []
+        }
+      ]
+    }
+  ]
+}
