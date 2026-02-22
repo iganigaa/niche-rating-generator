@@ -630,12 +630,143 @@
       80% { opacity: 1; }
       100% { opacity: 0; }
     }
+
+    /* Projects list */
+    .projects-section {
+      margin-bottom: 32px;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      background: #161b22;
+      overflow: hidden;
+    }
+    .projects-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 20px;
+      background: #1c2128;
+      border-bottom: 1px solid #30363d;
+      cursor: pointer;
+    }
+    .projects-header h2 {
+      font-size: 16px;
+      color: #fff;
+      margin: 0;
+    }
+    .projects-header .toggle-arrow {
+      color: #8b949e;
+      font-size: 14px;
+      transition: transform 0.2s;
+    }
+    .projects-header .toggle-arrow.open {
+      transform: rotate(180deg);
+    }
+    .projects-list {
+      padding: 12px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 12px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .projects-list:empty::after {
+      content: 'Нет сохранённых проектов';
+      color: #8b949e;
+      font-size: 13px;
+      padding: 20px;
+      text-align: center;
+      grid-column: 1 / -1;
+    }
+    .project-card {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 14px;
+      transition: border-color 0.2s;
+    }
+    .project-card:hover {
+      border-color: #58a6ff;
+    }
+    .project-card .pc-niche {
+      font-size: 15px;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .project-card .pc-geo {
+      font-size: 12px;
+      color: #8b949e;
+      margin-bottom: 8px;
+    }
+    .project-card .pc-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .project-card .pc-date {
+      font-size: 11px;
+      color: #6e7681;
+    }
+    .project-card .pc-status {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-weight: 500;
+    }
+    .pc-status.in_progress { background: #1f2d3d; color: #58a6ff; }
+    .pc-status.generated { background: #1a2e1a; color: #3fb950; }
+    .pc-status.filled { background: #2d1f3d; color: #bc8cff; }
+    .pc-status.edited { background: #2d2a1f; color: #d29922; }
+    .project-card .pc-actions {
+      display: flex;
+      gap: 6px;
+    }
+    .project-card .pc-actions button {
+      flex: 1;
+      padding: 5px 8px;
+      font-size: 11px;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      background: #21262d;
+      color: #c9d1d9;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .project-card .pc-actions button:hover {
+      background: #30363d;
+    }
+    .project-card .pc-actions button.pc-open {
+      background: #238636;
+      border-color: #238636;
+      color: #fff;
+    }
+    .project-card .pc-actions button.pc-open:hover {
+      background: #2ea043;
+    }
+    .project-card .pc-actions button.pc-delete:hover {
+      background: #da3633;
+      border-color: #da3633;
+      color: #fff;
+    }
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
   <div class="container">
     <h1>30 лучших компаний по нише</h1>
     <p class="subtitle">Введите нишу — получите списки от трёх нейросетей через OpenRouter</p>
+
+    <div class="projects-section" id="projects-section">
+      <div class="projects-header" onclick="toggleProjectsList()">
+        <h2>Мои проекты <span id="projects-count" style="color:#8b949e; font-weight:400;"></span></h2>
+        <span class="toggle-arrow" id="projects-arrow">▼</span>
+      </div>
+      <div class="projects-list" id="projects-list" style="display:none;"></div>
+    </div>
 
     <div class="form-section">
       <div class="input-group">
@@ -889,6 +1020,267 @@
   </div>
 
   <script>
+    // === Supabase Init ===
+    const SUPABASE_URL = 'https://ugnsytownksbsizpjfra.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVnbnN5dG93bmtzYnNpenBqZnJhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE3NjM1NjcsImV4cCI6MjA4NzMzOTU2N30.yugluBQY84Z9Wm-ebO1Bg1t802zgrv69YTGoyfFnhsA';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    let currentProjectId = null;
+
+    // === Supabase: Projects CRUD ===
+    const STATUS_LABELS = {
+      in_progress: 'Генерация',
+      generated: 'Сгенерирован',
+      filled: 'Наполнен',
+      edited: 'Отредактирован'
+    };
+
+    async function loadProjects() {
+      const { data, error } = await supabase
+        .from('projects')
+        .select('id, created_at, niche, geo, status')
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (error) {
+        console.error('Supabase loadProjects error:', error.message);
+        return;
+      }
+
+      const list = document.getElementById('projects-list');
+      const count = document.getElementById('projects-count');
+      count.textContent = data.length > 0 ? `(${data.length})` : '';
+
+      list.innerHTML = data.map(p => `
+        <div class="project-card" data-id="${p.id}">
+          <div class="pc-niche">${escHtml(p.niche)}</div>
+          <div class="pc-geo">${p.geo ? escHtml(p.geo) : 'Глобальный'}</div>
+          <div class="pc-meta">
+            <span class="pc-date">${new Date(p.created_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+            <span class="pc-status ${p.status}">${STATUS_LABELS[p.status] || p.status}</span>
+          </div>
+          <div class="pc-actions">
+            <button class="pc-open" onclick="openProject('${p.id}')">Открыть</button>
+            <button onclick="duplicateProject('${p.id}')">Дубл.</button>
+            <button class="pc-delete" onclick="deleteProject('${p.id}')">Удалить</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function escHtml(str) {
+      const d = document.createElement('div');
+      d.textContent = str;
+      return d.innerHTML;
+    }
+
+    function toggleProjectsList() {
+      const list = document.getElementById('projects-list');
+      const arrow = document.getElementById('projects-arrow');
+      const isHidden = list.style.display === 'none';
+      list.style.display = isHidden ? 'grid' : 'none';
+      arrow.classList.toggle('open', isHidden);
+      if (isHidden) loadProjects();
+    }
+
+    async function createProject() {
+      const niche = document.getElementById('niche').value.trim();
+      const geo = document.getElementById('geo').value.trim() || null;
+      const geoRequest = document.getElementById('geoRequest').value.trim() || null;
+      const queryLang = document.getElementById('queryLang').value;
+      const siteLang = document.getElementById('siteLang').value;
+      const userCompanyData = document.getElementById('user-company-data')?.value.trim() || '';
+
+      // Parse injection fields from userCompanyData (first line = name, URL found in text)
+      let injectionName = null, injectionUrl = null, injectionInfo = null;
+      if (userCompanyData) {
+        injectionInfo = userCompanyData;
+        const lines = userCompanyData.split('\n');
+        if (lines[0]) injectionName = lines[0].trim();
+        const urlMatch = userCompanyData.match(/https?:\/\/[^\s]+/);
+        if (urlMatch) injectionUrl = urlMatch[0];
+      }
+
+      const { data, error } = await supabase
+        .from('projects')
+        .insert({
+          niche,
+          geo,
+          geo_request: geoRequest,
+          query_lang: queryLang,
+          site_lang: siteLang,
+          injection_name: injectionName,
+          injection_url: injectionUrl,
+          injection_info: injectionInfo,
+          status: 'in_progress',
+          meta: {}
+        })
+        .select('id')
+        .single();
+
+      if (error) {
+        console.error('Supabase createProject error:', error.message);
+        return null;
+      }
+
+      currentProjectId = data.id;
+      return data.id;
+    }
+
+    async function updateProjectMeta(meta) {
+      if (!currentProjectId) return;
+      const { error } = await supabase
+        .from('projects')
+        .update({ meta, updated_at: new Date().toISOString() })
+        .eq('id', currentProjectId);
+      if (error) console.error('Supabase updateMeta error:', error.message);
+    }
+
+    async function updateProjectStatus(status, htmlContent) {
+      if (!currentProjectId) return;
+      const updateObj = { status, updated_at: new Date().toISOString() };
+      if (htmlContent !== undefined) updateObj.html_content = htmlContent;
+      const { error } = await supabase
+        .from('projects')
+        .update(updateObj)
+        .eq('id', currentProjectId);
+      if (error) console.error('Supabase updateStatus error:', error.message);
+    }
+
+    async function updateProjectHtml(htmlContent, seoBlock, countersBlock) {
+      if (!currentProjectId) return;
+      const updateObj = { html_content: htmlContent, updated_at: new Date().toISOString() };
+      if (seoBlock !== undefined) updateObj.seo_block = seoBlock;
+      if (countersBlock !== undefined) updateObj.counters_block = countersBlock;
+      const { error } = await supabase
+        .from('projects')
+        .update(updateObj)
+        .eq('id', currentProjectId);
+      if (error) console.error('Supabase updateHtml error:', error.message);
+    }
+
+    async function openProject(id) {
+      const { data, error } = await supabase
+        .from('projects')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      if (error || !data) {
+        alert('Ошибка загрузки проекта');
+        return;
+      }
+
+      currentProjectId = data.id;
+
+      // Restore form fields
+      document.getElementById('niche').value = data.niche || '';
+      document.getElementById('geo').value = data.geo || '';
+      document.getElementById('geoRequest').value = data.geo_request || '';
+      document.getElementById('queryLang').value = data.query_lang || 'Русский';
+      document.getElementById('siteLang').value = data.site_lang || 'Русский';
+      if (data.injection_info) {
+        document.getElementById('user-company-data').value = data.injection_info;
+      }
+
+      // Restore pipeline state from meta
+      if (data.meta) {
+        if (data.meta.extractedCompanies) extractedCompanies = data.meta.extractedCompanies;
+        if (data.meta.extractedRatings) extractedRatings = data.meta.extractedRatings;
+        if (data.meta.compilerRawXml) compilerRawXml = data.meta.compilerRawXml;
+        if (data.meta.grokCriteriaRaw) {
+          // Restore conversations if available
+        }
+      }
+
+      // Restore HTML content
+      if (data.html_content) {
+        canvasRawHtml = data.html_content;
+        const canvasSection = document.getElementById('canvas-section');
+        if (canvasSection) {
+          canvasSection.style.display = 'block';
+          const iframe = canvasSection.querySelector('iframe');
+          if (iframe) iframe.srcdoc = canvasRawHtml;
+        }
+
+        // Restore SEO and counters blocks
+        if (data.seo_block) {
+          const seoFields = ['counterYandex','counterGoogle','metaYandex','metaGoogle','metaTitle','metaDesc','metaKeywords','metaOgImage'];
+          try {
+            const seoData = JSON.parse(data.seo_block);
+            seoFields.forEach(f => {
+              const el = document.getElementById(f);
+              if (el && seoData[f]) el.value = seoData[f];
+            });
+          } catch(e) {}
+        }
+
+        // Show editor toolbar
+        const toolbar = document.getElementById('editor-toolbar');
+        if (toolbar) toolbar.style.display = 'flex';
+        document.getElementById('fill-btn')?.removeAttribute('disabled');
+      }
+
+      // Show relevant sections
+      if (data.meta?.currentStep) {
+        const sitesSection = document.getElementById('sites-section');
+        if (sitesSection && (data.meta.currentStep === 'step_8_web' || data.status !== 'in_progress')) {
+          sitesSection.style.display = 'block';
+        }
+      }
+
+      updatePreview();
+
+      // If in_progress and has currentStep, offer to continue
+      if (data.status === 'in_progress' && data.meta?.currentStep) {
+        showNotification(`Проект загружен. Остановлен на: ${data.meta.currentStep}`);
+      } else {
+        showNotification('Проект загружен');
+      }
+    }
+
+    async function duplicateProject(id) {
+      const { data, error } = await supabase
+        .from('projects')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      if (error || !data) return;
+
+      const { id: _id, created_at: _ca, updated_at: _ua, ...rest } = data;
+      rest.niche = rest.niche + ' (копия)';
+      rest.status = 'in_progress';
+
+      const { error: insertError } = await supabase
+        .from('projects')
+        .insert(rest);
+
+      if (insertError) {
+        alert('Ошибка дублирования');
+        return;
+      }
+      loadProjects();
+      showNotification('Проект дублирован');
+    }
+
+    async function deleteProject(id) {
+      if (!confirm('Удалить проект? Это действие необратимо.')) return;
+
+      const { error } = await supabase
+        .from('projects')
+        .delete()
+        .eq('id', id);
+
+      if (error) {
+        alert('Ошибка удаления');
+        return;
+      }
+
+      if (currentProjectId === id) currentProjectId = null;
+      loadProjects();
+      showNotification('Проект удалён');
+    }
+
     const MODELS = [
       { id: "openai/gpt-5", name: "ChatGPT (GPT-5)" },
       { id: "google/gemini-3-pro-preview", name: "Gemini 3 Pro" },
@@ -1546,6 +1938,7 @@ SCHEMA.ORG: Не дублируй JSON-LD сущности. Question — тол�
 
           document.getElementById("canvas-section").scrollIntoView({ behavior: "smooth" });
           saveState(); // Save after fill template
+          updateProjectStatus('filled', canvasRawHtml);
         }
       } catch (err) {
         fillLoading.innerHTML = `<div class="error-text" style="padding:20px;">[Ошибка] ${err.message}</div>`;
@@ -1666,6 +2059,7 @@ SCHEMA.ORG: Не дублируй JSON-LD сущности. Question — тол�
         const codeContent = document.getElementById("canvas-code-content");
         if (codeContent) codeContent.textContent = canvasRawHtml;
         saveState(); // Autosave after any editor action
+        updateProjectHtml(canvasRawHtml);
       }
     }
 
@@ -2284,6 +2678,9 @@ ${userComment}
       btn.disabled = true;
       btn.textContent = "Загрузка...";
 
+      // Create project in Supabase
+      await createProject();
+
       const geo = document.getElementById("geo").value.trim();
       const geoStr = geo ? ` в ${geo}` : '';
       const geoRequest = document.getElementById("geoRequest").value.trim();
@@ -2364,6 +2761,7 @@ ${userComment}
 
       await Promise.all(promises);
       saveState(); // Save after step 1-2
+      updateProjectMeta({ currentStep: 'step_1_2' });
 
       let grokCriteriaRaw = "";
       let grokAudienceRaw = "";
@@ -2419,6 +2817,7 @@ ${criteriaBlocks}
       }
 
       saveState(); // Save after Grok criteria
+      updateProjectMeta({ currentStep: 'step_3_criteria', grokCriteriaRaw });
 
       // --- Запрос 4: Аудитории и боли ---
       btn.textContent = "Анализ аудиторий (Grok)...";
@@ -2480,6 +2879,7 @@ ${criteriaBlocks}
       }
 
       saveState(); // Save after Grok audience
+      updateProjectMeta({ currentStep: 'step_4_audience', grokCriteriaRaw, grokAudienceRaw });
 
       // --- Запрос 5: Компилятор критериев (Claude) ---
       btn.textContent = "Компиляция XML-структуры (Claude)...";
@@ -2535,6 +2935,7 @@ ${grokAudienceRaw}
       }
 
       saveState(); // Save after compiler XML
+      updateProjectMeta({ currentStep: 'step_5_compiler', compilerRawXml, grokCriteriaRaw, grokAudienceRaw });
 
       // --- Запрос 6: Генерация сайта (Claude) ---
       btn.textContent = "Генерация сайта (Claude)...";
@@ -2831,6 +3232,8 @@ ${compilerRawXml}`;
       }
 
       saveState(); // Save after canvas generation (most expensive step)
+      updateProjectStatus('generated', canvasRawHtml);
+      updateProjectMeta({ currentStep: 'step_6', compilerRawXml, grokCriteriaRaw, grokAudienceRaw });
 
       // --- Запрос 6.5: Perplexity — поиск рейтингов ---
       btn.textContent = "Поиск рейтингов (Perplexity)...";
@@ -2998,6 +3401,14 @@ ${step1Responses}`;
       }
 
       saveState(); // Save at the end of full pipeline
+      updateProjectMeta({
+        currentStep: 'step_8_web',
+        compilerRawXml,
+        grokCriteriaRaw,
+        grokAudienceRaw,
+        extractedCompanies,
+        extractedRatings
+      });
 
       btn.disabled = false;
       btn.textContent = "Найти компании";
@@ -3009,6 +3420,9 @@ ${step1Responses}`;
 
     // Restore pipeline state from localStorage
     loadState();
+
+    // Load projects list from Supabase
+    loadProjects();
   </script>
 </body>
 </html>
