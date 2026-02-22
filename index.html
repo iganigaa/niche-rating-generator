@@ -1521,6 +1521,7 @@ DIFFERENTIATION ANCHOR:
       { id: 'step_6', label: 'Генерация сайта' },
       { id: 'step_7', label: 'Поиск рейтингов' },
       { id: 'step_8_web', label: 'Скачивание рейтингов' },
+      { id: 'step_fill', label: 'Наполнение контентом' },
     ];
 
     function getStepState(stepId, currentStep, projectStatus) {
@@ -1725,17 +1726,17 @@ DIFFERENTIATION ANCHOR:
             </div>
           </div>
 
-          <div id="fill-section-wrap" style="display:none; margin-top: 24px;">
+          <div id="fill-section" style="display:none; margin-top: 24px;">
             <div class="result-card">
+              <div class="result-header">
+                <span class="model-badge" style="background:#f0883e;">Claude</span>
+                <span class="model-name">Наполнение контентом</span>
+              </div>
               <div style="padding: 20px;">
-                <div class="fill-section">
-                  <label style="font-size:13px; color:#8b949e; font-weight:500;">Данные вашей компании (она станет #1 в рейтинге)</label>
-                  <textarea id="fill-company-data" placeholder="Название компании, описание услуг, преимущества, цены, отзывы клиентов..."></textarea>
-                  <button id="fill-btn" onclick="fillTemplate()" disabled>Наполнить контентом</button>
-                </div>
                 <div id="fill-loading" class="loading" style="display:none;">
                   <div class="spinner"></div>Claude наполняет сайт реальными данными...
                 </div>
+                <div id="fill-messages" class="chat-messages" style="max-height:none;"></div>
               </div>
             </div>
           </div>
@@ -1861,14 +1862,17 @@ DIFFERENTIATION ANCHOR:
           if (codeContent) codeContent.textContent = canvasRawHtml;
         }
 
-        // Show fill section
-        const fillWrap = document.getElementById('fill-section-wrap');
-        if (fillWrap) {
-          fillWrap.style.display = 'block';
-          document.getElementById('fill-btn').disabled = false;
-          // Pre-fill company data
-          const fillData = document.getElementById('fill-company-data');
-          if (fillData && project.injection_info) fillData.value = project.injection_info;
+        // Show fill section if already filled
+        if (project.status === 'filled') {
+          const fillSection = document.getElementById('fill-section');
+          if (fillSection) {
+            fillSection.style.display = '';
+            const fillMessages = document.getElementById('fill-messages');
+            if (fillMessages) fillMessages.innerHTML = `
+              <div class="chat-msg chat-msg-assistant" style="padding:12px">
+                <div style="font-size:12px; color:#7ee787;">Сайт наполнен реальными данными компаний</div>
+              </div>`;
+          }
         }
 
         // Restore SEO fields
@@ -2318,157 +2322,6 @@ DIFFERENTIATION ANCHOR:
       renderRatingsGrid();
     }
 
-    // Step 7b: Fill template with real data from downloaded sites + user data
-    async function fillTemplate() {
-      const apiKey = localStorage.getItem("openrouter_key") || '';
-      const project = currentProjectId ? getProjects().find(p => p.id === currentProjectId) : null;
-      const userCompanyData = document.getElementById("fill-company-data")?.value?.trim() || project?.injection_info || '';
-      const niche = project?.niche || '';
-      const fillBtn = document.getElementById("fill-btn");
-      const fillLoading = document.getElementById("fill-loading");
-
-      if (!apiKey) return alert("Нет API-ключа OpenRouter. Создайте новый проект.");
-      if (!canvasRawHtml) return alert("Сначала сгенерируйте сайт (шаги 1-6)");
-
-      fillBtn.disabled = true;
-      fillLoading.style.display = "flex";
-
-      // Build ratings data blocks (priority source — structured reviews)
-      const MAX_RATINGS_CHARS = 60000;
-      let ratingsChars = 0;
-      const ratingDataBlocks = extractedRatings
-        .filter(r => r.status === 'done' && downloadedRatings[r.name])
-        .map(r => {
-          const text = downloadedRatings[r.name].text.substring(0, 8000);
-          ratingsChars += text.length;
-          if (ratingsChars > MAX_RATINGS_CHARS) return null;
-          return `=== ${r.name} (${r.url}) ===\n${text}`;
-        })
-        .filter(Boolean)
-        .join("\n\n---\n\n");
-
-      const fillSiteLang = project?.site_lang || 'Русский';
-      const fillSiteLangStr = `Весь контент сайта на языке: ${fillSiteLang}`;
-
-      // --- Защита PROTECTED блоков ---
-      let savedSeoBlock = '';
-      let savedCountersBlock = '';
-      let cleanedCanvasHtml = canvasRawHtml;
-
-      const seoMatch = cleanedCanvasHtml.match(/<!-- PROTECTED:SEO:START -->([\s\S]*?)<!-- PROTECTED:SEO:END -->/);
-      if (seoMatch) {
-        savedSeoBlock = seoMatch[1];
-        cleanedCanvasHtml = cleanedCanvasHtml.replace(seoMatch[0], '<!-- PROTECTED:SEO:START --><!-- PROTECTED:SEO:END -->');
-      }
-      const countersMatch = cleanedCanvasHtml.match(/<!-- PROTECTED:COUNTERS:START -->([\s\S]*?)<!-- PROTECTED:COUNTERS:END -->/);
-      if (countersMatch) {
-        savedCountersBlock = countersMatch[1];
-        cleanedCanvasHtml = cleanedCanvasHtml.replace(countersMatch[0], '<!-- PROTECTED:COUNTERS:START --><!-- PROTECTED:COUNTERS:END -->');
-      }
-
-      const fillPrompt = `ЯЗЫК САЙТА: ${fillSiteLangStr}
-
-РОЛЬ: Ты — Senior SEO-копирайтер и веб-разработчик. Твоя задача — наполнить готовый HTML-шаблон рейтинга реальными данными компаний.
-
-ВХОДНЫЕ ДАННЫЕ:
-
-1. HTML-ШАБЛОН САЙТА:
-<template>
-${cleanedCanvasHtml}
-</template>
-
-2. ДАННЫЕ С РЕЙТИНГОВЫХ САЙТОВ (структурированные обзоры — ОСНОВНОЙ источник фактов):
-<ratings_data>
-${ratingDataBlocks || "(Рейтинговые сайты не были скачаны)"}
-</ratings_data>
-
-3. ДАННЫЕ КОМПАНИИ ПОЛЬЗОВАТЕЛЯ (ДОЛЖНА СТАТЬ #1 В РЕЙТИНГЕ):
-<user_company>
-${userCompanyData || "(Пользователь не предоставил данные своей компании)"}
-</user_company>
-
-4. XML-СТРУКТУРА КРИТЕРИЕВ:
-<criteria>
-${compilerRawXml}
-</criteria>
-
-ЗАДАЧА:
-1. Используй данные рейтинговых сайтов (ratings_data) как ОСНОВНОЙ источник фактов: названия компаний, описания, цены, баллы, преимущества, недостатки.
-2. Наполни HTML-шаблон реальными данными:
-   - Замени placeholder-названия на реальные.
-   - Замени placeholder-описания на реальные данные.
-   - Заполни метрики на основе анализа данных.
-   - Обнови баллы и рейтинги.
-3. КРИТИЧЕСКИ ВАЖНО: Компания пользователя (из user_company) ДОЛЖНА быть на 1 месте с бейджем "Выбор редакции" и наивысшими баллами.
-4. Сохрани всю структуру, стили, Schema.org разметку и JavaScript из шаблона.
-5. ${fillSiteLangStr}.
-
-СОХРАНЕНИЕ РАЗМЕТКИ БЛОКОВ:
-Все атрибуты data-block-id, data-block-type, data-company-rank на элементах <section> и <tr> должны быть сохранены в неизменном виде. Не удалять, не менять нумерацию. Если добавляешь новые блоки — продолжай нумерацию data-block-id с максимального существующего +1.
-
-ЗАЩИТНЫЕ МАРКЕРЫ:
-Блоки между <!-- PROTECTED:SEO:START/END --> и <!-- PROTECTED:COUNTERS:START/END --> в <head> НЕ ТРОГАЙ. Не удаляй маркеры, не меняй содержимое между ними, не перемещай их.
-
-SCHEMA.ORG: Не дублируй JSON-LD сущности. Question — только внутри FAQPage.mainEntity, не создавай отдельные JSON-LD блоки для Question. Person — один блок с @id, остальные ссылаются через @id.
-
-ФОРМАТ: Выведи ТОЛЬКО полный HTML-код. Без пояснений, без markdown, без тройных бэктиков. Чистый HTML начиная с <!DOCTYPE html>.`;
-
-      try {
-        const fillData = await callModel("anthropic/claude-sonnet-4.5", [{ role: "user", content: fillPrompt }], apiKey);
-
-        if (fillData.error) {
-          fillLoading.innerHTML = `<div class="error-text" style="padding:20px;">[Ошибка] ${fillData.error}</div>`;
-        } else {
-          let filledHtml = fillData.content;
-          filledHtml = filledHtml.replace(/^```html?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
-
-          // --- Восстановление PROTECTED блоков ---
-          if (savedSeoBlock) {
-            if (filledHtml.includes('<!-- PROTECTED:SEO:START -->')) {
-              filledHtml = filledHtml.replace(
-                /<!-- PROTECTED:SEO:START -->[\s\S]*?<!-- PROTECTED:SEO:END -->/,
-                `<!-- PROTECTED:SEO:START -->${savedSeoBlock}<!-- PROTECTED:SEO:END -->`
-              );
-            } else {
-              filledHtml = filledHtml.replace('</head>', `<!-- PROTECTED:SEO:START -->${savedSeoBlock}<!-- PROTECTED:SEO:END -->\n</head>`);
-            }
-          }
-          if (savedCountersBlock) {
-            if (filledHtml.includes('<!-- PROTECTED:COUNTERS:START -->')) {
-              filledHtml = filledHtml.replace(
-                /<!-- PROTECTED:COUNTERS:START -->[\s\S]*?<!-- PROTECTED:COUNTERS:END -->/,
-                `<!-- PROTECTED:COUNTERS:START -->${savedCountersBlock}<!-- PROTECTED:COUNTERS:END -->`
-              );
-            } else {
-              filledHtml = filledHtml.replace('</head>', `<!-- PROTECTED:COUNTERS:START -->${savedCountersBlock}<!-- PROTECTED:COUNTERS:END -->\n</head>`);
-            }
-          }
-
-          canvasRawHtml = filledHtml;
-
-          const iframe = document.getElementById("canvas-iframe");
-          iframe.srcdoc = filledHtml;
-
-          const codeContent = document.getElementById("canvas-code-content");
-          codeContent.textContent = filledHtml;
-
-          fillLoading.style.display = "none";
-
-          // Show editor toolbar + reset editor state
-          document.getElementById("editor-toolbar").style.display = "flex";
-          editorActive = false;
-          historyStack = [];
-          historyIndex = -1;
-
-          document.getElementById("canvas-section").scrollIntoView({ behavior: "smooth" });
-          updateProjectStatus('filled', canvasRawHtml);
-        }
-      } catch (err) {
-        fillLoading.innerHTML = `<div class="error-text" style="padding:20px;">[Ошибка] ${err.message}</div>`;
-      }
-
-      fillBtn.disabled = false;
-    }
 
     function switchCanvasTab(tab) {
       const previewEl = document.getElementById('canvas-preview');
@@ -4306,17 +4159,6 @@ ${compilerRawXml}`;
           document.getElementById('ratings-progress').textContent = `Ошибка: ${err.message}`;
         }
 
-        // Show fill section
-        const fillWrap = document.getElementById("fill-section-wrap");
-        if (fillWrap) {
-          fillWrap.style.display = "block";
-          document.getElementById('fill-btn').disabled = false;
-          // Pre-fill company data from project
-          const fillData = document.getElementById('fill-company-data');
-          if (fillData && project.injection_info) fillData.value = project.injection_info;
-          fillWrap.scrollIntoView({ behavior: "smooth" });
-        }
-
         updateTimelineStep('step_8_web', 'done');
         updateProjectMeta({
           currentStep: 'step_8_web',
@@ -4326,6 +4168,169 @@ ${compilerRawXml}`;
           extractedRatings,
           downloadedRatings
         });
+      }
+
+      // === STEP FILL: Auto-fill template with real data ===
+      if (startIdx <= 8) {
+        updateTimelineStep('step_fill', 'running');
+        const fillSection = document.getElementById('fill-section');
+        if (fillSection) fillSection.style.display = '';
+        const fillLoading = document.getElementById('fill-loading');
+        const fillMessages = document.getElementById('fill-messages');
+        if (fillLoading) fillLoading.style.display = 'flex';
+
+        try {
+          if (!canvasRawHtml) throw new Error('Нет HTML-шаблона (шаги 1-6 не выполнены)');
+
+          const userCompanyData = project.injection_info || '';
+
+          // Build ratings data blocks
+          const MAX_RATINGS_CHARS = 60000;
+          let ratingsChars = 0;
+          const ratingDataBlocks = extractedRatings
+            .filter(r => r.status === 'done' && downloadedRatings[r.name])
+            .map(r => {
+              const text = downloadedRatings[r.name].text.substring(0, 8000);
+              ratingsChars += text.length;
+              if (ratingsChars > MAX_RATINGS_CHARS) return null;
+              return `=== ${r.name} (${r.url}) ===\n${text}`;
+            })
+            .filter(Boolean)
+            .join('\n\n---\n\n');
+
+          const fillSiteLang = project?.site_lang || 'Русский';
+          const fillSiteLangStr = `Весь контент сайта на языке: ${fillSiteLang}`;
+
+          // Protect SEO/counters blocks
+          let savedSeoBlock = '';
+          let savedCountersBlock = '';
+          let cleanedCanvasHtml = canvasRawHtml;
+
+          const seoMatch = cleanedCanvasHtml.match(/<!-- PROTECTED:SEO:START -->([\s\S]*?)<!-- PROTECTED:SEO:END -->/);
+          if (seoMatch) {
+            savedSeoBlock = seoMatch[1];
+            cleanedCanvasHtml = cleanedCanvasHtml.replace(seoMatch[0], '<!-- PROTECTED:SEO:START --><!-- PROTECTED:SEO:END -->');
+          }
+          const countersMatch = cleanedCanvasHtml.match(/<!-- PROTECTED:COUNTERS:START -->([\s\S]*?)<!-- PROTECTED:COUNTERS:END -->/);
+          if (countersMatch) {
+            savedCountersBlock = countersMatch[1];
+            cleanedCanvasHtml = cleanedCanvasHtml.replace(countersMatch[0], '<!-- PROTECTED:COUNTERS:START --><!-- PROTECTED:COUNTERS:END -->');
+          }
+
+          const fillPrompt = `ЯЗЫК САЙТА: ${fillSiteLangStr}
+
+РОЛЬ: Ты — Senior SEO-копирайтер и веб-разработчик. Твоя задача — наполнить готовый HTML-шаблон рейтинга реальными данными компаний.
+
+ВХОДНЫЕ ДАННЫЕ:
+
+1. HTML-ШАБЛОН САЙТА:
+<template>
+${cleanedCanvasHtml}
+</template>
+
+2. ДАННЫЕ С РЕЙТИНГОВЫХ САЙТОВ (структурированные обзоры — ОСНОВНОЙ источник фактов):
+<ratings_data>
+${ratingDataBlocks || '(Рейтинговые сайты не были скачаны)'}
+</ratings_data>
+
+3. ДАННЫЕ КОМПАНИИ ПОЛЬЗОВАТЕЛЯ (ДОЛЖНА СТАТЬ #1 В РЕЙТИНГЕ):
+<user_company>
+${userCompanyData || '(Пользователь не предоставил данные своей компании)'}
+</user_company>
+
+4. XML-СТРУКТУРА КРИТЕРИЕВ:
+<criteria>
+${compilerRawXml}
+</criteria>
+
+ЗАДАЧА:
+1. Используй данные рейтинговых сайтов (ratings_data) как ОСНОВНОЙ источник фактов: названия компаний, описания, цены, баллы, преимущества, недостатки.
+2. Наполни HTML-шаблон реальными данными:
+   - Замени placeholder-названия на реальные.
+   - Замени placeholder-описания на реальные данные.
+   - Заполни метрики на основе анализа данных.
+   - Обнови баллы и рейтинги.
+3. КРИТИЧЕСКИ ВАЖНО: Компания пользователя (из user_company) ДОЛЖНА быть на 1 месте с бейджем "Выбор редакции" и наивысшими баллами.
+4. Сохрани всю структуру, стили, Schema.org разметку и JavaScript из шаблона.
+5. ${fillSiteLangStr}.
+
+СОХРАНЕНИЕ РАЗМЕТКИ БЛОКОВ:
+Все атрибуты data-block-id, data-block-type, data-company-rank на элементах <section> и <tr> должны быть сохранены в неизменном виде. Не удалять, не менять нумерацию. Если добавляешь новые блоки — продолжай нумерацию data-block-id с максимального существующего +1.
+
+ЗАЩИТНЫЕ МАРКЕРЫ:
+Блоки между <!-- PROTECTED:SEO:START/END --> и <!-- PROTECTED:COUNTERS:START/END --> в <head> НЕ ТРОГАЙ. Не удаляй маркеры, не меняй содержимое между ними, не перемещай их.
+
+SCHEMA.ORG: Не дублируй JSON-LD сущности. Question — только внутри FAQPage.mainEntity, не создавай отдельные JSON-LD блоки для Question. Person — один блок с @id, остальные ссылаются через @id.
+
+ФОРМАТ: Выведи ТОЛЬКО полный HTML-код. Без пояснений, без markdown, без тройных бэктиков. Чистый HTML начиная с <!DOCTYPE html>.`;
+
+          const fillData = await callModel('anthropic/claude-sonnet-4.5', [{ role: 'user', content: fillPrompt }], apiKey);
+
+          if (fillData.error) throw new Error(fillData.error);
+
+          let filledHtml = fillData.content;
+          filledHtml = filledHtml.replace(/^```html?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+
+          // Restore protected blocks
+          if (savedSeoBlock) {
+            if (filledHtml.includes('<!-- PROTECTED:SEO:START -->')) {
+              filledHtml = filledHtml.replace(
+                /<!-- PROTECTED:SEO:START -->[\s\S]*?<!-- PROTECTED:SEO:END -->/,
+                `<!-- PROTECTED:SEO:START -->${savedSeoBlock}<!-- PROTECTED:SEO:END -->`
+              );
+            } else {
+              filledHtml = filledHtml.replace('</head>', `<!-- PROTECTED:SEO:START -->${savedSeoBlock}<!-- PROTECTED:SEO:END -->\n</head>`);
+            }
+          }
+          if (savedCountersBlock) {
+            if (filledHtml.includes('<!-- PROTECTED:COUNTERS:START -->')) {
+              filledHtml = filledHtml.replace(
+                /<!-- PROTECTED:COUNTERS:START -->[\s\S]*?<!-- PROTECTED:COUNTERS:END -->/,
+                `<!-- PROTECTED:COUNTERS:START -->${savedCountersBlock}<!-- PROTECTED:COUNTERS:END -->`
+              );
+            } else {
+              filledHtml = filledHtml.replace('</head>', `<!-- PROTECTED:COUNTERS:START -->${savedCountersBlock}<!-- PROTECTED:COUNTERS:END -->\n</head>`);
+            }
+          }
+
+          canvasRawHtml = filledHtml;
+
+          const iframe = document.getElementById('canvas-iframe');
+          if (iframe) iframe.srcdoc = filledHtml;
+          const codeContent = document.getElementById('canvas-code-content');
+          if (codeContent) codeContent.textContent = filledHtml;
+
+          // Show editor toolbar + reset editor state
+          const editorToolbar = document.getElementById('editor-toolbar');
+          if (editorToolbar) editorToolbar.style.display = 'flex';
+          editorActive = false;
+          historyStack = [];
+          historyIndex = -1;
+
+          if (fillLoading) fillLoading.style.display = 'none';
+          if (fillMessages) {
+            fillMessages.innerHTML = `
+              <div class="chat-msg chat-msg-assistant" style="padding:12px">
+                <div style="font-size:12px; color:#7ee787;">Сайт наполнен реальными данными компаний</div>
+              </div>`;
+          }
+
+          document.getElementById('canvas-section').scrollIntoView({ behavior: 'smooth' });
+          updateProjectStatus('filled', canvasRawHtml);
+          updateTimelineStep('step_fill', 'done');
+          updateProjectMeta({ currentStep: 'step_fill' });
+
+        } catch (fillErr) {
+          console.error('Fill template error:', fillErr);
+          if (fillLoading) fillLoading.style.display = 'none';
+          if (fillMessages) {
+            fillMessages.innerHTML = `
+              <div class="chat-msg chat-msg-assistant" style="padding:12px">
+                <div style="font-size:12px; color:#f0883e;">[Ошибка наполнения] ${fillErr.message}</div>
+              </div>`;
+          }
+          updateTimelineStep('step_fill', 'error');
+        }
       }
 
       } catch (pipelineErr) {
