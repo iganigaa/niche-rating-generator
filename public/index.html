@@ -988,23 +988,9 @@
       </div>
     </div>
 
-    <div id="sites-section" style="display:none; margin-top: 40px;">
-      <h2 style="text-align:center; font-size:22px; margin-bottom:16px; color:#fff;">Загрузка сайтов компаний</h2>
-      <div class="result-card" id="sites-card">
-        <div class="result-header">
-          <span class="model-badge" style="background:#8b5cf6;">Web</span>
-          <span class="model-name">Скачивание сайтов TOP-5 компаний</span>
-        </div>
+    <div id="fill-section-wrap" style="display:none; margin-top: 40px;">
+      <div class="result-card">
         <div style="padding: 20px;">
-          <div class="download-progress" id="download-progress">Извлечение списка компаний...</div>
-          <div class="companies-grid" id="companies-grid"></div>
-          <div id="company-preview-wrap" style="display:none; margin-top: 16px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-              <span id="company-preview-title" style="font-size:14px; color:#58a6ff; font-weight:600;"></span>
-              <button class="copy-btn" onclick="document.getElementById('company-preview-wrap').style.display='none'">Закрыть</button>
-            </div>
-            <iframe id="company-preview-iframe" class="company-preview-frame" sandbox="allow-scripts allow-same-origin"></iframe>
-          </div>
           <div class="fill-section">
             <label style="font-size:13px; color:#8b949e; font-weight:500;">Данные вашей компании (она станет #1 в рейтинге)</label>
             <textarea id="user-company-data" placeholder="Название компании, описание услуг, преимущества, цены, отзывы клиентов..."></textarea>
@@ -1162,7 +1148,6 @@
 
       // Restore pipeline state from meta
       if (data.meta) {
-        if (data.meta.extractedCompanies) extractedCompanies = data.meta.extractedCompanies;
         if (data.meta.extractedRatings) extractedRatings = data.meta.extractedRatings;
         if (data.meta.compilerRawXml) compilerRawXml = data.meta.compilerRawXml;
       }
@@ -1195,12 +1180,10 @@
         document.getElementById('fill-btn')?.removeAttribute('disabled');
       }
 
-      // Show relevant sections
-      if (data.meta?.currentStep) {
-        const sitesSection = document.getElementById('sites-section');
-        if (sitesSection && (data.meta.currentStep === 'step_8_web' || data.status !== 'in_progress')) {
-          sitesSection.style.display = 'block';
-        }
+      // Show fill section for completed projects
+      if (data.meta?.currentStep === 'step_8_web' || data.status !== 'in_progress') {
+        const fillWrap = document.getElementById('fill-section-wrap');
+        if (fillWrap) fillWrap.style.display = 'block';
       }
 
       updatePreview();
@@ -1361,8 +1344,6 @@
 
     let compilerRawXml = ""; // Store for copy button
     let canvasRawHtml = ""; // Store for copy button
-    let extractedCompanies = []; // [{name, url, status, errorReason}]
-    let downloadedSites = {};    // {name: {html, text}}
     let extractedRatings = [];   // [{name, url, status, errorReason}]
     let downloadedRatings = {};  // {name: {html, text}}
 
@@ -1384,9 +1365,7 @@
           conversations: conversations,
           compilerRawXml,
           canvasRawHtml,
-          extractedCompanies,
           extractedRatings,
-          downloadedSites,
           downloadedRatings,
           // Section innerHTML for visual restore
           sections: {
@@ -1403,7 +1382,7 @@
             compiler: document.getElementById('compiler-section')?.style.display !== 'none',
             canvas: document.getElementById('canvas-section')?.style.display !== 'none',
             ratings: document.getElementById('ratings-section')?.style.display !== 'none',
-            sites: document.getElementById('sites-section')?.style.display !== 'none',
+            fill: document.getElementById('fill-section-wrap')?.style.display !== 'none',
           },
           userCompanyData: document.getElementById('user-company-data')?.value || '',
         };
@@ -1432,9 +1411,7 @@
         if (state.conversations) Object.assign(conversations, state.conversations);
         if (state.compilerRawXml) compilerRawXml = state.compilerRawXml;
         if (state.canvasRawHtml) canvasRawHtml = state.canvasRawHtml;
-        if (state.extractedCompanies) extractedCompanies = state.extractedCompanies;
         if (state.extractedRatings) extractedRatings = state.extractedRatings;
-        if (state.downloadedSites) downloadedSites = state.downloadedSites;
         if (state.downloadedRatings) downloadedRatings = state.downloadedRatings;
 
         // Restore section content
@@ -1463,10 +1440,8 @@
             document.getElementById('ratings-section').style.display = 'block';
             if (typeof renderRatingsGrid === 'function') renderRatingsGrid();
           }
-          if (state.visibility.sites) {
-            document.getElementById('sites-section').style.display = 'block';
-            if (typeof renderCompaniesGrid === 'function') renderCompaniesGrid();
-            // Enable fill button if we have data
+          if (state.visibility.fill || state.visibility.sites) {
+            document.getElementById('fill-section-wrap').style.display = 'block';
             if (canvasRawHtml && compilerRawXml) {
               document.getElementById('fill-btn').disabled = false;
             }
@@ -1502,58 +1477,7 @@
       return text.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+/g, ' ').trim();
     }
 
-    // Render company buttons grid with download status
-    function renderCompaniesGrid() {
-      const grid = document.getElementById('companies-grid');
-      if (!grid) return;
-
-      const doneCount = extractedCompanies.filter(c => c.status === 'done').length;
-      const totalCount = extractedCompanies.length;
-      const errorCount = extractedCompanies.filter(c => c.status === 'error').length;
-
-      document.getElementById('download-progress').textContent =
-        `Загружено: ${doneCount} из ${totalCount}` + (errorCount > 0 ? ` (ошибок: ${errorCount})` : '');
-
-      grid.innerHTML = extractedCompanies.map((company, idx) => {
-        const tooltip = company.status === 'error'
-          ? `Ошибка: ${company.errorReason || 'неизвестна'}\nURL: ${company.url || '—'}`
-          : (company.url || 'URL не найден');
-        return `
-        <button class="company-btn status-${company.status}"
-                onclick="previewCompanySite(${idx})"
-                title="${tooltip}">
-          <span class="company-status-icon ${company.status}"></span>
-          <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${company.name}</span>
-          ${company.status === 'loading' ? '<span class="spinner-small"></span>' : ''}
-        </button>`;
-      }).join('');
-
-      const fillBtn = document.getElementById('fill-btn');
-      if (fillBtn) fillBtn.disabled = doneCount === 0;
-    }
-
-    // Preview a downloaded company site in iframe (or show error details)
-    function previewCompanySite(idx) {
-      const company = extractedCompanies[idx];
-      if (!company) return;
-
-      if (company.status === 'error') {
-        alert(`Ошибка загрузки: ${company.name}\nURL: ${company.url || '—'}\nПричина: ${company.errorReason || 'неизвестна'}`);
-        return;
-      }
-      if (company.status !== 'done') return;
-
-      const wrap = document.getElementById('company-preview-wrap');
-      const iframe = document.getElementById('company-preview-iframe');
-      const title = document.getElementById('company-preview-title');
-
-      title.textContent = `${company.name} — ${company.url}`;
-      iframe.srcdoc = downloadedSites[company.name]?.html || '<p>Нет данных</p>';
-      wrap.style.display = 'block';
-      wrap.scrollIntoView({ behavior: 'smooth' });
-    }
-
-    // Render ratings grid (analogous to companies grid)
+    // Render ratings grid
     function renderRatingsGrid() {
       const grid = document.getElementById('ratings-grid');
       if (!grid) return;
@@ -1682,29 +1606,6 @@
       }
     }
 
-    // Download a single company site
-    async function downloadCompanySite(company, index) {
-      if (!company.url) {
-        extractedCompanies[index].status = 'error';
-        extractedCompanies[index].errorReason = 'URL не найден';
-        renderCompaniesGrid();
-        return;
-      }
-
-      extractedCompanies[index].status = 'loading';
-      renderCompaniesGrid();
-
-      const result = await downloadSite(company.url);
-      if (result.ok) {
-        downloadedSites[company.name] = { html: result.html, text: result.text };
-        extractedCompanies[index].status = 'done';
-      } else {
-        extractedCompanies[index].status = 'error';
-        extractedCompanies[index].errorReason = result.error;
-      }
-      renderCompaniesGrid();
-    }
-
     // Download a single rating site
     async function downloadRatingSite(rating, index) {
       if (!rating.url) {
@@ -1756,20 +1657,6 @@
         .filter(Boolean)
         .join("\n\n---\n\n");
 
-      // Build company data blocks — only TOP-5 companies have downloaded sites
-      const MAX_COMPANY_CHARS = 40000;
-      let companyChars = 0;
-      const companyDataBlocks = extractedCompanies
-        .filter(c => c.status === 'done' && downloadedSites[c.name])
-        .map(c => {
-          const text = downloadedSites[c.name].text.substring(0, 5000);
-          companyChars += text.length;
-          if (companyChars > MAX_COMPANY_CHARS) return null;
-          return `=== ${c.name} (${c.url}) ===\n${text}`;
-        })
-        .filter(Boolean)
-        .join("\n\n---\n\n");
-
       const fillSiteLang = document.getElementById("siteLang").value;
       const fillSiteLangStr = `Весь контент сайта на языке: ${fillSiteLang}`;
 
@@ -1805,37 +1692,26 @@ ${cleanedCanvasHtml}
 ${ratingDataBlocks || "(Рейтинговые сайты не были скачаны)"}
 </ratings_data>
 
-3. ДАННЫЕ С САЙТОВ КОМПАНИЙ (только TOP-5, дополнительный источник):
-<companies_data>
-${companyDataBlocks || "(Сайты компаний не были скачаны)"}
-</companies_data>
-
-4. ДАННЫЕ КОМПАНИИ ПОЛЬЗОВАТЕЛЯ (ДОЛЖНА СТАТЬ #1 В РЕЙТИНГЕ):
+3. ДАННЫЕ КОМПАНИИ ПОЛЬЗОВАТЕЛЯ (ДОЛЖНА СТАТЬ #1 В РЕЙТИНГЕ):
 <user_company>
 ${userCompanyData || "(Пользователь не предоставил данные своей компании)"}
 </user_company>
 
-5. XML-СТРУКТУРА КРИТЕРИЕВ:
+4. XML-СТРУКТУРА КРИТЕРИЕВ:
 <criteria>
 ${compilerRawXml}
 </criteria>
 
-ИСТОЧНИКИ ДАННЫХ И ПРИОРИТЕТ:
-1. РЕЙТИНГОВЫЕ САЙТЫ (приоритет) — данные для ВСЕХ компаний, включая TOP-5 и компактную таблицу 6+.
-2. САЙТЫ КОМПАНИЙ (TOP-5 только) — детальные данные для расширенных карточек первых 5 компаний.
-3. Для компаний 6+ используй ТОЛЬКО данные из рейтинговых сайтов. Сайты этих компаний НЕ скачаны.
-
 ЗАДАЧА:
 1. Используй данные рейтинговых сайтов (ratings_data) как ОСНОВНОЙ источник фактов: названия компаний, описания, цены, баллы, преимущества, недостатки.
-2. Дополняй данными с сайтов компаний (companies_data) — для TOP-5 карточек.
-3. Наполни HTML-шаблон реальными данными:
+2. Наполни HTML-шаблон реальными данными:
    - Замени placeholder-названия на реальные.
    - Замени placeholder-описания на реальные данные.
    - Заполни метрики на основе анализа данных.
    - Обнови баллы и рейтинги.
-4. КРИТИЧЕСКИ ВАЖНО: Компания пользователя (из user_company) ДОЛЖНА быть на 1 месте с бейджем "Выбор редакции" и наивысшими баллами.
-5. Сохрани всю структуру, стили, Schema.org разметку и JavaScript из шаблона.
-6. ${fillSiteLangStr}.
+3. КРИТИЧЕСКИ ВАЖНО: Компания пользователя (из user_company) ДОЛЖНА быть на 1 месте с бейджем "Выбор редакции" и наивысшими баллами.
+4. Сохрани всю структуру, стили, Schema.org разметку и JavaScript из шаблона.
+5. ${fillSiteLangStr}.
 
 СОХРАНЕНИЕ РАЗМЕТКИ БЛОКОВ:
 Все атрибуты data-block-id, data-block-type, data-company-rank на элементах <section> и <tr> должны быть сохранены в неизменном виде. Не удалять, не менять нумерацию. Если добавляешь новые блоки — продолжай нумерацию data-block-id с максимального существующего +1.
@@ -2422,20 +2298,39 @@ SCHEMA.ORG: Не дублируй JSON-LD сущности. Question — тол�
       }
       block.appendChild(loader);
 
-      // Collect context
+      // Collect context — minimal CSS for speed
       const blockHtml = block.outerHTML;
-      const siteStyles = Array.from(iDoc.querySelectorAll('style'))
-        .map(s => s.textContent)
-        .join('\n');
       const siteLang = document.getElementById('siteLang')?.value || 'Русский';
+
+      // Extract only :root vars and classes used in the block
+      const allStyles = Array.from(iDoc.querySelectorAll('style')).map(s => s.textContent).join('\n');
+      const rootMatch = allStyles.match(/:root\s*\{[^}]*\}/g);
+      const rootVars = rootMatch ? rootMatch.join('\n') : '';
+      // Find class names used in block HTML
+      const classNames = new Set();
+      (blockHtml.match(/class="([^"]*)"/g) || []).forEach(m => {
+        m.replace(/class="([^"]*)"/, '$1').split(/\s+/).forEach(c => { if (c && !c.startsWith('__editor')) classNames.add(c); });
+      });
+      // Extract only matching CSS rules (up to 4000 chars)
+      let relevantCSS = rootVars + '\n';
+      if (classNames.size > 0) {
+        const classPattern = new RegExp('\\.' + [...classNames].map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|\\.'), 'g');
+        const rules = allStyles.match(/[^{}]*\{[^}]*\}/g) || [];
+        for (const rule of rules) {
+          if (classPattern.test(rule)) {
+            relevantCSS += rule + '\n';
+            if (relevantCSS.length > 4000) break;
+          }
+        }
+      }
 
       const regenPrompt = `РОЛЬ: Ты — фронтенд-разработчик. Перерисуй HTML-блок по инструкции пользователя.
 
 ЯЗЫК КОНТЕНТА: ${siteLang}
 
-СТИЛЕВОЙ КОНТЕКСТ САЙТА (НЕ МЕНЯЙ СТИЛИ — используй те же CSS-классы, custom properties, шрифты и цветовую схему):
+СТИЛЕВОЙ КОНТЕКСТ (CSS-переменные и классы блока):
 <site_styles>
-${siteStyles}
+${relevantCSS}
 </site_styles>
 
 ТЕКУЩИЙ HTML БЛОКА:
@@ -2456,12 +2351,11 @@ ${userComment}
 7. Формат ответа: только HTML, без пояснений, без markdown, без обёрток в тройные бэктики`;
 
       try {
-        const data = await callModel("anthropic/claude-sonnet-4.5", [{ role: "user", content: regenPrompt }], apiKey);
+        const data = await callModel("anthropic/claude-haiku-4.5", [{ role: "user", content: regenPrompt }], apiKey);
 
         if (data.error) {
           loader.remove();
           showNotification('Ошибка регенерации: ' + data.error, true);
-          // Undo the snapshot (rollback)
           editorUndo();
           return;
         }
@@ -2582,7 +2476,7 @@ ${userComment}
       // Pass config to editor window
       win.__EDITOR_CONFIG__ = {
         apiKey: document.getElementById('apiKey').value.trim(),
-        model: 'anthropic/claude-sonnet-4.5',
+        model: 'anthropic/claude-haiku-4.5',
         siteLang: document.getElementById('siteLang')?.value || 'Русский',
         projectId: currentProjectId
       };
@@ -3676,90 +3570,11 @@ ${compilerRawXml}`;
         document.getElementById('ratings-progress').textContent = `Ошибка: ${err.message}`;
       }
 
-      // --- Запрос 7a: Извлечение компаний + скачивание сайтов ---
-      btn.textContent = "Загрузка сайтов компаний...";
-
-      const sitesSection = document.getElementById("sites-section");
-      sitesSection.style.display = "block";
-      sitesSection.scrollIntoView({ behavior: "smooth" });
-
-      // Collect step 1 responses (first assistant message from each model)
-      const step1Responses = MODELS.map(m => {
-        const msgs = conversations[m.id] || [];
-        const firstAssistant = msgs.find(msg => msg.role === "assistant");
-        return `=== ${m.name} ===\n${firstAssistant?.content || "(нет ответа)"}`;
-      }).join("\n\n");
-
-      const extractPrompt = `ЯЗЫК ОТВЕТА: ${queryLangStr}
-
-Из текста ниже извлеки все уникальные компании. Для каждой компании определи название и URL основного сайта.
-
-ПРАВИЛА:
-1. Объедини дубликаты (одна и та же компания от разных моделей = одна запись).
-2. URL должен начинаться с https:// и быть основным доменом компании.
-3. Если URL не указан в тексте, попытайся определить его по названию компании.
-4. Верни JSON-массив и НИЧЕГО больше. Без markdown, без пояснений, без бэктиков.
-
-Формат ответа (строго JSON):
-[{"name": "Company Name", "url": "https://example.com"}, ...]
-
-Текст:
-${step1Responses}`;
-
-      document.getElementById('download-progress').textContent = 'AI извлекает список компаний и URL...';
-
-      try {
-        const extractData = await callModel("anthropic/claude-sonnet-4.5", [{ role: "user", content: extractPrompt }], apiKey);
-
-        if (extractData.error) {
-          document.getElementById('download-progress').textContent = `Ошибка извлечения: ${extractData.error}`;
-        } else {
-          let jsonStr = extractData.content.replace(/^```json?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
-
-          try {
-            const companies = JSON.parse(jsonStr);
-
-            // Deduplicate by lowercased name
-            const seen = new Set();
-            extractedCompanies = companies.filter(c => {
-              const key = c.name.toLowerCase().trim();
-              if (seen.has(key)) return false;
-              seen.add(key);
-              return true;
-            }).map(c => ({ name: c.name, url: c.url, status: 'pending' }));
-
-            renderCompaniesGrid();
-
-            // Download only TOP-5 company sites (or TOP-4 if user company injection exists)
-            const hasUserCompany = !!document.getElementById("user-company-data").value.trim();
-            const topN = hasUserCompany ? 4 : 5; // #1 = user company, so download 4 others
-            const topIndices = extractedCompanies
-              .map((_, i) => i)
-              .slice(0, topN);
-
-            const queue = [...topIndices];
-
-            async function processQueue() {
-              while (queue.length > 0) {
-                const idx = queue.shift();
-                await downloadCompanySite(extractedCompanies[idx], idx);
-              }
-            }
-
-            const workers = Array.from(
-              { length: Math.min(5, queue.length) },
-              () => processQueue()
-            );
-
-            await Promise.all(workers);
-
-          } catch (parseErr) {
-            document.getElementById('download-progress').textContent = `Ошибка парсинга JSON: ${parseErr.message}`;
-          }
-        }
-      } catch (err) {
-        document.getElementById('download-progress').textContent = `Ошибка: ${err.message}`;
-      }
+      // Show fill section and enable fill button
+      const fillWrap = document.getElementById("fill-section-wrap");
+      fillWrap.style.display = "block";
+      document.getElementById('fill-btn').disabled = false;
+      fillWrap.scrollIntoView({ behavior: "smooth" });
 
       saveState(); // Save at the end of full pipeline
       updateProjectMeta({
@@ -3767,7 +3582,6 @@ ${step1Responses}`;
         compilerRawXml,
         grokCriteriaRaw,
         grokAudienceRaw,
-        extractedCompanies,
         extractedRatings
       });
 
