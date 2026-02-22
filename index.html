@@ -1029,7 +1029,7 @@
   <script>
     // === Projects: localStorage ===
     let currentProjectId = null;
-    const PROJECTS_KEY = 'nrg_projects';
+    // Projects stored on server via /api/projects
 
     const STATUS_LABELS = {
       in_progress: 'Генерация',
@@ -1070,8 +1070,8 @@
     window.addEventListener('hashchange', router);
 
     // === Dashboard ===
-    function renderDashboard() {
-      const projects = getProjects();
+    async function renderDashboard() {
+      const projects = await getProjects();
       const container = document.getElementById('screen-dashboard');
 
       if (projects.length === 0) {
@@ -1116,403 +1116,14 @@
       `;
     }
 
-    function getProjects() {
-      try { return JSON.parse(localStorage.getItem(PROJECTS_KEY) || '[]'); }
-      catch { return []; }
+    async function getProjects() {
+      try {
+        const resp = await fetch('/api/projects');
+        return await resp.json();
+      } catch { return []; }
     }
 
-    function saveProjects(projects) {
-      localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
-    }
-
-    // ============ BM25 SEARCH ENGINE (ported from ui-ux-pro-max/core.py) ============
-    class BM25 {
-      constructor(k1 = 1.5, b = 0.75) {
-        this.k1 = k1;
-        this.b = b;
-        this.corpus = [];
-        this.docLengths = [];
-        this.avgdl = 0;
-        this.idf = {};
-        this.docFreqs = {};
-        this.N = 0;
-      }
-
-      tokenize(text) {
-        return String(text).toLowerCase().replace(/[^\w\s]/g, ' ')
-          .split(/\s+/).filter(w => w.length > 2);
-      }
-
-      fit(documents) {
-        this.corpus = documents.map(d => this.tokenize(d));
-        this.N = this.corpus.length;
-        if (this.N === 0) return;
-        this.docLengths = this.corpus.map(d => d.length);
-        this.avgdl = this.docLengths.reduce((a, b) => a + b, 0) / this.N;
-        this.docFreqs = {};
-        for (const doc of this.corpus) {
-          const seen = new Set();
-          for (const word of doc) {
-            if (!seen.has(word)) {
-              this.docFreqs[word] = (this.docFreqs[word] || 0) + 1;
-              seen.add(word);
-            }
-          }
-        }
-        this.idf = {};
-        for (const [word, freq] of Object.entries(this.docFreqs)) {
-          this.idf[word] = Math.log((this.N - freq + 0.5) / (freq + 0.5) + 1);
-        }
-      }
-
-      score(query) {
-        const queryTokens = this.tokenize(query);
-        const scores = [];
-        for (let idx = 0; idx < this.corpus.length; idx++) {
-          let score = 0;
-          const doc = this.corpus[idx];
-          const docLen = this.docLengths[idx];
-          const termFreqs = {};
-          for (const word of doc) termFreqs[word] = (termFreqs[word] || 0) + 1;
-          for (const token of queryTokens) {
-            if (this.idf[token] !== undefined) {
-              const tf = termFreqs[token] || 0;
-              const idfVal = this.idf[token];
-              const num = tf * (this.k1 + 1);
-              const den = tf + this.k1 * (1 - this.b + this.b * docLen / this.avgdl);
-              score += idfVal * num / den;
-            }
-          }
-          scores.push([idx, score]);
-        }
-        scores.sort((a, b) => b[1] - a[1]);
-        return scores;
-      }
-    }
-
-    // ============ DESIGN DATA CONFIG (ported from ui-ux-pro-max) ============
-    const DESIGN_CSV_CONFIG = {
-      style: {
-        file: 'styles.json',
-        searchCols: ['Style Category', 'Keywords', 'Best For', 'Type'],
-        outputCols: ['Style Category', 'Type', 'Keywords', 'Primary Colors', 'Effects & Animation', 'Best For', 'Performance', 'Accessibility']
-      },
-      color: {
-        file: 'colors.json',
-        searchCols: ['Product Type', 'Keywords', 'Notes'],
-        outputCols: ['Product Type', 'Keywords', 'Primary (Hex)', 'Secondary (Hex)', 'CTA (Hex)', 'Background (Hex)', 'Text (Hex)', 'Notes']
-      },
-      landing: {
-        file: 'landing.json',
-        searchCols: ['Pattern Name', 'Keywords', 'Conversion Optimization', 'Section Order'],
-        outputCols: ['Pattern Name', 'Keywords', 'Section Order', 'Primary CTA Placement', 'Color Strategy', 'Conversion Optimization']
-      },
-      product: {
-        file: 'products.json',
-        searchCols: ['Product Type', 'Keywords', 'Primary Style Recommendation', 'Key Considerations'],
-        outputCols: ['Product Type', 'Keywords', 'Primary Style Recommendation', 'Color Palette Focus']
-      },
-      typography: {
-        file: 'typography.json',
-        searchCols: ['Font Pairing Name', 'Category', 'Mood/Style Keywords', 'Best For', 'Heading Font', 'Body Font'],
-        outputCols: ['Font Pairing Name', 'Heading Font', 'Body Font', 'Mood/Style Keywords', 'Best For', 'Google Fonts URL', 'CSS Import']
-      }
-    };
-
-    const designDataCache = {};
-
-    async function loadDesignData(filename) {
-      if (designDataCache[filename]) return designDataCache[filename];
-      return withRetry(async () => {
-        const resp = await fetch('/design-data/' + filename);
-        if (!resp.ok) throw new Error('Failed to load ' + filename);
-        const data = await resp.json();
-        designDataCache[filename] = data;
-        return data;
-      }, { retries: 3, baseDelay: 1000, label: filename });
-    }
-
-    async function searchDesignCSV(domain, query, maxResults = 3) {
-      const config = DESIGN_CSV_CONFIG[domain];
-      if (!config) return [];
-      const data = await loadDesignData(config.file);
-      const documents = data.map(row =>
-        config.searchCols.map(col => row[col] || '').join(' ')
-      );
-      const bm25 = new BM25();
-      bm25.fit(documents);
-      const ranked = bm25.score(query);
-      return ranked.slice(0, maxResults)
-        .filter(([, s]) => s > 0)
-        .map(([idx]) => {
-          const row = data[idx];
-          const result = {};
-          config.outputCols.forEach(col => { if (row[col]) result[col] = row[col]; });
-          return result;
-        });
-    }
-
-    // ============ DESIGN SYSTEM GENERATOR (ported from design_system.py) ============
-
-    function findReasoningRule(category, reasoningData) {
-      const catLower = category.toLowerCase();
-      // Pass 1: exact match
-      for (const rule of reasoningData) {
-        if ((rule.UI_Category || '').toLowerCase() === catLower) return rule;
-      }
-      // Pass 2: partial match
-      for (const rule of reasoningData) {
-        const uiCat = (rule.UI_Category || '').toLowerCase();
-        if (uiCat.includes(catLower) || catLower.includes(uiCat)) return rule;
-      }
-      // Pass 3: keyword match
-      for (const rule of reasoningData) {
-        const uiCat = (rule.UI_Category || '').toLowerCase();
-        const keywords = uiCat.replace(/\//g, ' ').replace(/-/g, ' ').split(/\s+/);
-        if (keywords.some(kw => kw && catLower.includes(kw))) return rule;
-      }
-      return null;
-    }
-
-    function applyReasoning(category, reasoningData) {
-      const rule = findReasoningRule(category, reasoningData);
-      if (!rule) {
-        return {
-          pattern: 'Hero + Features + CTA',
-          stylePriority: ['Minimalism', 'Flat Design'],
-          colorMood: 'Professional',
-          typographyMood: 'Clean',
-          keyEffects: 'Subtle hover transitions',
-          antiPatterns: '',
-          severity: 'MEDIUM'
-        };
-      }
-      let decisionRules = {};
-      try { decisionRules = JSON.parse(rule.Decision_Rules || '{}'); } catch {}
-      return {
-        pattern: rule.Recommended_Pattern || '',
-        stylePriority: (rule.Style_Priority || '').split('+').map(s => s.trim()).filter(Boolean),
-        colorMood: rule.Color_Mood || '',
-        typographyMood: rule.Typography_Mood || '',
-        keyEffects: rule.Key_Effects || '',
-        antiPatterns: rule.Anti_Patterns || '',
-        decisionRules,
-        severity: rule.Severity || 'MEDIUM'
-      };
-    }
-
-    function selectBestMatch(results, priorityKeywords) {
-      if (!results.length) return {};
-      if (!priorityKeywords || !priorityKeywords.length) return results[0];
-      // Strategy 1: exact style name match
-      for (const priority of priorityKeywords) {
-        const pLower = priority.toLowerCase().trim();
-        for (const result of results) {
-          const styleName = (result['Style Category'] || '').toLowerCase();
-          if (pLower.includes(styleName) || styleName.includes(pLower)) return result;
-        }
-      }
-      // Strategy 2: scored keyword match
-      const scored = results.map(result => {
-        const resultStr = JSON.stringify(result).toLowerCase();
-        let score = 0;
-        for (const kw of priorityKeywords) {
-          const kwLower = kw.toLowerCase().trim();
-          if ((result['Style Category'] || '').toLowerCase().includes(kwLower)) score += 10;
-          else if ((result['Keywords'] || '').toLowerCase().includes(kwLower)) score += 3;
-          else if (resultStr.includes(kwLower)) score += 1;
-        }
-        return { score, result };
-      });
-      scored.sort((a, b) => b.score - a.score);
-      return scored[0].score > 0 ? scored[0].result : results[0];
-    }
-
-    async function generateDesignSystem(query, projectName) {
-      // Step 1: Search products → category
-      const reasoningData = await loadDesignData('ui-reasoning.json');
-      const productResults = await searchDesignCSV('product', query, 1);
-      const category = productResults[0]?.['Product Type'] || 'General';
-
-      // Step 2: Apply reasoning rules
-      const reasoning = applyReasoning(category, reasoningData);
-      const stylePriority = reasoning.stylePriority;
-
-      // Step 3: Multi-domain search (style biased by stylePriority)
-      const styleQuery = stylePriority.length
-        ? `${query} ${stylePriority.slice(0, 2).join(' ')}`
-        : query;
-      const [styleResults, colorResults, landingResults, typographyResults] = await Promise.all([
-        searchDesignCSV('style', styleQuery, 3),
-        searchDesignCSV('color', query, 2),
-        searchDesignCSV('landing', query, 2),
-        searchDesignCSV('typography', query, 2)
-      ]);
-
-      // Step 4: Select best matches
-      const bestStyle = selectBestMatch(styleResults, stylePriority);
-      const bestColor = colorResults[0] || {};
-      const bestTypography = typographyResults[0] || {};
-      const bestLanding = landingResults[0] || {};
-
-      // Step 5: Assemble
-      const styleEffects = bestStyle['Effects & Animation'] || '';
-      const combinedEffects = styleEffects || reasoning.keyEffects;
-
-      return {
-        projectName: projectName || query.toUpperCase(),
-        category,
-        pattern: {
-          name: bestLanding['Pattern Name'] || reasoning.pattern || 'Hero + Features + CTA',
-          sections: bestLanding['Section Order'] || 'Hero > Features > CTA',
-          ctaPlacement: bestLanding['Primary CTA Placement'] || 'Above fold',
-          colorStrategy: bestLanding['Color Strategy'] || '',
-          conversion: bestLanding['Conversion Optimization'] || ''
-        },
-        style: {
-          name: bestStyle['Style Category'] || 'Minimalism',
-          type: bestStyle['Type'] || 'General',
-          effects: styleEffects,
-          keywords: bestStyle['Keywords'] || '',
-          bestFor: bestStyle['Best For'] || '',
-          performance: bestStyle['Performance'] || '',
-          accessibility: bestStyle['Accessibility'] || ''
-        },
-        colors: {
-          primary: bestColor['Primary (Hex)'] || '#2563EB',
-          secondary: bestColor['Secondary (Hex)'] || '#3B82F6',
-          cta: bestColor['CTA (Hex)'] || '#F97316',
-          background: bestColor['Background (Hex)'] || '#F8FAFC',
-          text: bestColor['Text (Hex)'] || '#1E293B',
-          notes: bestColor['Notes'] || ''
-        },
-        typography: {
-          heading: bestTypography['Heading Font'] || 'Inter',
-          body: bestTypography['Body Font'] || 'Inter',
-          mood: bestTypography['Mood/Style Keywords'] || reasoning.typographyMood || '',
-          bestFor: bestTypography['Best For'] || '',
-          googleFontsUrl: bestTypography['Google Fonts URL'] || '',
-          cssImport: bestTypography['CSS Import'] || ''
-        },
-        keyEffects: combinedEffects,
-        antiPatterns: reasoning.antiPatterns,
-        severity: reasoning.severity
-      };
-    }
-
-    function formatDesignSystemForPrompt(ds) {
-      const antiLines = (ds.antiPatterns || '').split('+').map(p => '- ' + p.trim()).filter(l => l !== '- ').join('\n');
-      return `———————————————————————————
-ДИЗАЙН-СИСТЕМА (СГЕНЕРИРОВАНА АВТОМАТИЧЕСКИ ПОД НИШУ: ${ds.category})
-———————————————————————————
-
-AESTHETIC DIRECTION: ${ds.style.name} — ${ds.style.keywords || ds.style.type}
-${ds.style.bestFor ? `Best For: ${ds.style.bestFor}` : ''}
-${ds.style.performance ? `Performance: ${ds.style.performance} | Accessibility: ${ds.style.accessibility}` : ''}
-
-ТИПОГРАФИКА:
-- Heading: ${ds.typography.heading}
-- Body: ${ds.typography.body}
-- Mood: ${ds.typography.mood}
-${ds.typography.cssImport ? `- CSS Import: ${ds.typography.cssImport}` : ''}
-- Подключи через Google Fonts CDN с display=swap + preconnect
-- Используй typography структурно: контраст размеров, ритм, иерархия через scale
-
-ЦВЕТА (определи через CSS custom properties :root):
-- Primary: ${ds.colors.primary}
-- Secondary: ${ds.colors.secondary}
-- CTA: ${ds.colors.cta}
-- Background: ${ds.colors.background}
-- Text: ${ds.colors.text}
-${ds.colors.notes ? `- Notes: ${ds.colors.notes}` : ''}
-
-ПАТТЕРН СТРАНИЦЫ: ${ds.pattern.name}
-- Секции: ${ds.pattern.sections}
-- CTA: ${ds.pattern.ctaPlacement}
-${ds.pattern.conversion ? `- Conversion: ${ds.pattern.conversion}` : ''}
-${ds.pattern.colorStrategy ? `- Color Strategy: ${ds.pattern.colorStrategy}` : ''}
-
-MOTION И ЭФФЕКТЫ:
-${ds.keyEffects || '- Subtle hover transitions (150-300ms)'}
-${ds.style.effects && ds.style.effects !== ds.keyEffects ? `- ${ds.style.effects}` : ''}
-
-АНТИ-ПАТТЕРНЫ (= ПРОВАЛ):
-${antiLines}
-- Дефолтные Tailwind/ShadCN layouts
-- Системные шрифты (Inter, Roboto, Arial, system-ui)
-- Если дизайн можно спутать с шаблоном — переделай
-
-ДОПОЛНИТЕЛЬНЫЕ ОБЯЗАТЕЛЬНЫЕ ПРАВИЛА:
-- ЗАПРЕЩЕНЫ: emojis как иконки — использовать SVG (Heroicons/Lucide)
-- cursor-pointer на всех кликабельных элементах
-- Hover transitions: 150-300ms
-- prefers-reduced-motion: reduce — отключать анимации
-- Контраст текста: минимум 4.5:1 (AA)
-- Focus-visible стили на интерактивных элементах
-- Responsive: 375px, 768px, 1024px, 1440px
-- Шрифты через Google Fonts CDN с display=swap + preconnect
-- Все цвета через CSS custom properties (:root)`;
-    }
-
-    const DEFAULT_DESIGN_SYSTEM = `———————————————————————————
-ДИЗАЙН-СИСТЕМА (ОБЯЗАТЕЛЬНАЯ К ИСПОЛНЕНИЮ)
-———————————————————————————
-
-AESTHETIC DIRECTION: Editorial / Magazine — строгий, экспертный, с характером.
-Если ниша технологическая — допустим сдвиг к Industrial / Utilitarian.
-
-ТИПОГРАФИКА (КРИТИЧЕСКИ ВАЖНО):
-- ЗАПРЕЩЕНЫ: Inter, Roboto, Arial, system-ui, sans-serif по умолчанию
-- Выбери 1 expressive display шрифт (например: Playfair Display, Space Grotesk, Instrument Serif, Clash Display, Syne, DM Serif Display) для заголовков
-- Выбери 1 restrained body шрифт (например: Source Serif 4, Literata, IBM Plex Sans, Outfit, Satoshi) для текста
-- Подключи через Google Fonts CDN
-- Используй typography структурно: контраст размеров, ритм, иерархия через scale
-
-ЦВЕТА:
-- Определи все цвета через CSS custom properties (:root)
-- Схема: 1 доминантный фон + 1 акцент + 1 нейтральная система (светлый/тёмный)
-- ЗАПРЕЩЕНЫ: purple-on-white SaaS градиенты, равномерно-сбалансированные палитры
-- Цвета должны передавать настроение: доверие, экспертность, серьёзность
-
-ПРОСТРАНСТВО И КОМПОНОВКА:
-- Ломай сетку намеренно: используй асимметрию, overlap элементов, controlled density
-- Негативное пространство — это дизайн-элемент, не пустота
-- ЗАПРЕЩЕНЫ: симметричные предсказуемые секции, дефолтные grid-layouts
-- TOP-5 карточки должны визуально отличаться друг от друга позиционированием
-
-MOTION И ЭФФЕКТЫ:
-- Анимации: purposeful, sparse, high-impact
-- 1 сильная entrance-анимация для hero-блока
-- Несколько meaningful hover-состояний для карточек и CTA
-- ЗАПРЕЩЕНЫ: decorative micro-motion spam, бесконечные пульсации
-- CSS-first анимации. JS-анимации только если CSS недостаточно
-
-ТЕКСТУРА И REFINEMENT:
-- Используй минимум 2 из: noise/grain overlay, gradient mesh, layered translucency, custom borders/dividers, shadows с narrative intent
-- Тени — не box-shadow по умолчанию, а с конкретным смыслом (глубина карточки, выделение лидера)
-
-DIFFERENTIATION ANCHOR:
-- Если убрать логотип и текст — дизайн всё равно должен быть узнаваемым
-- Должен быть хотя бы 1 элемент, который запомнится через 24 часа
-
-АНТИ-ПАТТЕРНЫ (= ПРОВАЛ):
-- Дефолтные Tailwind/ShadCN layouts
-- Системные шрифты
-- Purple-on-white градиенты
-- Симметричные секции без характера
-- Если дизайн можно спутать с шаблоном — переделай
-
-ДОПОЛНИТЕЛЬНЫЕ ОБЯЗАТЕЛЬНЫЕ ПРАВИЛА:
-- ЗАПРЕЩЕНЫ: emojis как иконки — использовать SVG (Heroicons/Lucide)
-- cursor-pointer на всех кликабельных элементах
-- Hover transitions: 150-300ms
-- prefers-reduced-motion: reduce — отключать анимации
-- Контраст текста: минимум 4.5:1 (AA)
-- Focus-visible стили на интерактивных элементах
-- Responsive: 375px, 768px, 1024px, 1440px
-- Шрифты через Google Fonts CDN с display=swap + preconnect
-- Все цвета через CSS custom properties (:root)`;
-
+    // BM25 + Design System moved to server-side bm25.js
     // === Pipeline Steps Definition ===
     const PIPELINE_STEPS = [
       { id: 'step_1_2', label: 'Списки + критерии' },
@@ -1556,10 +1167,13 @@ DIFFERENTIATION ANCHOR:
     }
 
     // === Project View ===
-    function renderProject(id) {
-      const projects = getProjects();
-      const project = projects.find(p => p.id === id);
+    async function renderProject(id) {
       const container = document.getElementById('screen-project');
+      let project;
+      try {
+        const resp = await fetch(`/api/projects/${id}`);
+        if (resp.ok) project = await resp.json();
+      } catch {}
 
       if (!project) {
         container.innerHTML = `
@@ -1573,7 +1187,6 @@ DIFFERENTIATION ANCHOR:
       }
 
       currentProjectId = project.id;
-      const hasHtml = !!project.html_content;
       const nicheGeo = project.geo ? `${escHtml(project.niche)} в ${escHtml(project.geo)}` : escHtml(project.niche);
 
       container.innerHTML = `
@@ -1757,30 +1370,34 @@ DIFFERENTIATION ANCHOR:
 Гео: ${project.geo || '—'}
 Язык запросов: ${project.query_lang || 'Русский'}
 Язык сайта: ${project.site_lang || 'Русский'}
-Статус: ${project.status}
+Статус: ${project.status} | Пайплайн: ${project.pipelineStatus || 'idle'}
 Шаг пайплайна: ${project.meta?.currentStep || '—'}
-Компания: ${project.injection_name || '—'}
-Размер HTML: ${project.html_content ? (project.html_content.length / 1024).toFixed(1) + ' KB' : '—'}</pre>
+Компания: ${project.injection_name || '—'}</pre>
           </div>
         </details>
       `;
 
       // Restore state from project meta and render existing results
-      restoreProjectState(project);
+      await restoreProjectState(project);
 
-      // Auto-start or show resume button
-      if (project.status === 'in_progress' && !project.meta?.currentStep) {
-        setTimeout(() => runPipeline(project.id), 100);
-      } else if (project.status === 'in_progress' && project.meta?.currentStep) {
+      // Auto-connect SSE if pipeline is running
+      if (project.pipelineStatus === 'running') {
+        pipelineRunning = true;
+        connectPipelineSSE(project.id);
+      } else if (project.pipelineStatus === 'idle' && project.currentStep) {
+        // Show resume button
         const stepLabels = Object.fromEntries(PIPELINE_STEPS.map(s => [s.id, s.label]));
         const resumeBar = document.getElementById('project-resume-bar');
         resumeBar.innerHTML = `
           <div class="project-resume-bar">
-            <span style="flex:1;">⏸ Пайплайн остановлен на шаге: <strong>${stepLabels[project.meta.currentStep] || project.meta.currentStep}</strong></span>
-            <button onclick="runPipeline('${project.id}', '${getNextStep(project.meta.currentStep)}')" style="background:#238636; border-color:#238636; color:#fff;">Продолжить</button>
+            <span style="flex:1;">Пайплайн остановлен на шаге: <strong>${stepLabels[project.currentStep] || project.currentStep}</strong></span>
+            <button onclick="runPipeline('${project.id}', '${getNextStep(project.currentStep)}')" style="background:#238636; border-color:#238636; color:#fff;">Продолжить</button>
             <button onclick="runPipeline('${project.id}')" style="background:#1f6feb; border-color:#1f6feb; color:#fff;">Перезапустить</button>
           </div>
         `;
+      } else if (project.status === 'new' && !project.currentStep) {
+        // New project — auto-start
+        setTimeout(() => runPipeline(project.id), 100);
       }
     }
 
@@ -1791,135 +1408,120 @@ DIFFERENTIATION ANCHOR:
       return stepOrder[idx + 1];
     }
 
-    function restoreProjectState(project) {
-      // Restore global vars from project meta
-      if (project.meta) {
-        if (project.meta.conversations) Object.assign(conversations, project.meta.conversations);
-        if (project.meta.compilerRawXml) compilerRawXml = project.meta.compilerRawXml;
-        if (project.meta.grokCriteriaRaw) {
-          // Show grok section with saved content
-          const grokSection = document.getElementById('grok-section');
-          const grokMsgs = document.getElementById('grok-messages');
-          if (grokSection && grokMsgs && project.meta.grokCriteriaHtml) {
-            grokSection.style.display = 'block';
-            grokMsgs.innerHTML = project.meta.grokCriteriaHtml;
-          }
-        }
-        if (project.meta.grokAudienceRaw) {
-          const audSection = document.getElementById('audience-section');
-          const audMsgs = document.getElementById('audience-messages');
-          if (audSection && audMsgs && project.meta.audienceHtml) {
-            audSection.style.display = 'block';
-            audMsgs.innerHTML = project.meta.audienceHtml;
-          }
-        }
-        if (project.meta.designSystemRaw) {
-          const designSection = document.getElementById('design-section');
-          const designMsgs = document.getElementById('design-messages');
-          if (designSection && designMsgs) {
-            designSection.style.display = 'block';
-            designMsgs.innerHTML = `
-              <div class="chat-msg chat-msg-assistant" style="padding:20px">
-                <div class="chat-msg-label">Design System (BM25)</div>
-                <div style="white-space:pre-wrap; font-size:12px; color:#8b949e">${project.meta.designSystemRaw.replace(/</g, '&lt;')}</div>
-              </div>`;
-          }
-        }
-        if (project.meta.compilerRawXml) {
-          const compSection = document.getElementById('compiler-section');
-          const compMsgs = document.getElementById('compiler-messages');
-          if (compSection && compMsgs && project.meta.compilerHtml) {
-            compSection.style.display = 'block';
-            compMsgs.innerHTML = project.meta.compilerHtml;
-          }
-        }
-        if (project.meta.extractedRatings) {
-          extractedRatings = project.meta.extractedRatings;
-          if (project.meta.downloadedRatings) downloadedRatings = project.meta.downloadedRatings;
-          const ratingsSection = document.getElementById('ratings-section');
-          if (ratingsSection && extractedRatings.length > 0) {
-            ratingsSection.style.display = 'block';
-            renderRatingsGrid();
-          }
-        }
-        // Restore model cards
-        if (project.meta.conversations && project.meta.resultsHtml) {
-          const resultsDiv = document.getElementById('results');
-          if (resultsDiv) resultsDiv.innerHTML = project.meta.resultsHtml;
+    async function restoreProjectState(project) {
+      const meta = project.meta || {};
+
+      // Restore global vars from meta
+      if (meta.conversations) Object.assign(conversations, meta.conversations);
+      if (meta.compilerRawXml) compilerRawXml = meta.compilerRawXml;
+
+      // Restore step results using the same rendering as SSE
+      if (meta.conversations) {
+        renderStepResult('step_1_2', { conversations: meta.conversations });
+      }
+      if (meta.grokCriteriaRaw) {
+        const s = document.getElementById('grok-section');
+        if (s) s.style.display = 'block';
+        renderStepResult('step_3', { grokCriteriaRaw: meta.grokCriteriaRaw });
+      }
+      if (meta.grokAudienceRaw) {
+        const s = document.getElementById('audience-section');
+        if (s) s.style.display = 'block';
+        renderStepResult('step_4', { grokAudienceRaw: meta.grokAudienceRaw });
+      }
+      if (meta.designSystemRaw) {
+        const s = document.getElementById('design-section');
+        if (s) s.style.display = 'block';
+        renderStepResult('step_design', { designSystemRaw: meta.designSystemRaw });
+      }
+      if (meta.compilerRawXml) {
+        const s = document.getElementById('compiler-section');
+        if (s) s.style.display = 'block';
+        renderStepResult('step_5', { compilerRawXml: meta.compilerRawXml });
+      }
+      if (meta.extractedRatings) {
+        extractedRatings = meta.extractedRatings;
+        if (meta.downloadedRatings) downloadedRatings = meta.downloadedRatings;
+        const s = document.getElementById('ratings-section');
+        if (s && extractedRatings.length > 0) {
+          s.style.display = 'block';
+          renderRatingsGrid();
         }
       }
 
-      // Restore HTML preview
-      if (project.html_content) {
-        canvasRawHtml = project.html_content;
-        const canvasSection = document.getElementById('canvas-section');
-        if (canvasSection) {
-          canvasSection.style.display = 'block';
-          document.getElementById('canvas-toolbar').style.display = 'flex';
-          document.getElementById('editor-toolbar').style.display = 'flex';
-          document.getElementById('canvas-preview').style.display = 'block';
-          const iframe = document.getElementById('canvas-iframe');
-          if (iframe) setTimeout(() => { iframe.srcdoc = canvasRawHtml; }, 0);
-          const codeContent = document.getElementById('canvas-code-content');
-          if (codeContent) codeContent.textContent = canvasRawHtml;
-        }
+      // Restore HTML preview from server
+      try {
+        const htmlResp = await fetch(`/api/projects/${project.id}/html`);
+        if (htmlResp.ok) {
+          canvasRawHtml = await htmlResp.text();
+          if (canvasRawHtml) {
+            const canvasSection = document.getElementById('canvas-section');
+            if (canvasSection) {
+              canvasSection.style.display = 'block';
+              document.getElementById('canvas-toolbar').style.display = 'flex';
+              document.getElementById('editor-toolbar').style.display = 'flex';
+              document.getElementById('canvas-preview').style.display = 'block';
+              const iframe = document.getElementById('canvas-iframe');
+              if (iframe) setTimeout(() => { iframe.srcdoc = canvasRawHtml; }, 0);
+              const codeContent = document.getElementById('canvas-code-content');
+              if (codeContent) codeContent.textContent = canvasRawHtml;
+            }
 
-        // Show fill section if already filled
-        if (project.status === 'filled') {
-          const fillSection = document.getElementById('fill-section');
-          if (fillSection) {
-            fillSection.style.display = '';
-            const fillMessages = document.getElementById('fill-messages');
-            if (fillMessages) fillMessages.innerHTML = `
-              <div class="chat-msg chat-msg-assistant" style="padding:12px">
-                <div style="font-size:12px; color:#7ee787;">Сайт наполнен реальными данными компаний</div>
-              </div>`;
+            if (project.status === 'filled') {
+              const fillSection = document.getElementById('fill-section');
+              if (fillSection) {
+                fillSection.style.display = '';
+                const fillMessages = document.getElementById('fill-messages');
+                if (fillMessages) fillMessages.innerHTML = `
+                  <div class="chat-msg chat-msg-assistant" style="padding:12px">
+                    <div style="font-size:12px; color:#7ee787;">Сайт наполнен реальными данными компаний</div>
+                  </div>`;
+              }
+            }
           }
         }
+      } catch {}
 
-        // Restore SEO fields
-        if (project.seo_block) {
-          try {
-            const seoData = JSON.parse(project.seo_block);
-            ['counterYandex','counterGoogle','metaYandex','metaGoogle','metaTitle','metaDesc','metaKeywords','metaOgImage'].forEach(f => {
-              const el = document.getElementById(f);
-              if (el && seoData[f]) el.value = seoData[f];
-            });
-          } catch(e) {}
-        }
+      // Restore SEO fields
+      if (project.seo_block) {
+        try {
+          const seoData = JSON.parse(project.seo_block);
+          ['counterYandex','counterGoogle','metaYandex','metaGoogle','metaTitle','metaDesc','metaKeywords','metaOgImage'].forEach(f => {
+            const el = document.getElementById(f);
+            if (el && seoData[f]) el.value = seoData[f];
+          });
+        } catch(e) {}
       }
     }
 
     // === Start Project (from generator form) ===
-    function startProject() {
+    async function startProject() {
       const apiKey = document.getElementById("apiKey").value.trim();
       const niche = document.getElementById("niche").value.trim();
       if (!apiKey) return alert("Введите API-ключ OpenRouter");
       if (!niche) return alert("Введите название ниши");
       localStorage.setItem("openrouter_key", apiKey);
-      const projectId = createProject();
-      location.hash = '#/project/' + projectId;
+      const projectId = await createProject();
+      if (projectId) location.hash = '#/project/' + projectId;
     }
 
     // Project view actions
-    function projectOpenInEditor(id) {
-      const projects = getProjects();
-      const project = projects.find(p => p.id === id);
-      if (!project || !project.html_content) return showNotification('Нет HTML для редактирования', true);
-      currentProjectId = project.id;
-      canvasRawHtml = project.html_content;
+    async function projectOpenInEditor(id) {
+      const resp = await fetch(`/api/projects/${id}/html`);
+      if (!resp.ok) return showNotification('Нет HTML для редактирования', true);
+      canvasRawHtml = await resp.text();
+      currentProjectId = id;
       openInEditor();
     }
 
-    function projectDownloadHtml(id) {
-      const projects = getProjects();
-      const project = projects.find(p => p.id === id);
-      if (!project || !project.html_content) return showNotification('Нет HTML для скачивания', true);
+    async function projectDownloadHtml(id) {
+      const resp = await fetch(`/api/projects/${id}/html`);
+      if (!resp.ok) return showNotification('Нет HTML для скачивания', true);
+      const html = await resp.text();
 
-      const niche = project.niche || 'site';
       const dateStr = new Date().toISOString().slice(0, 10);
-      const filename = `rating-${niche.replace(/[^a-zA-Zа-яА-Я0-9]/g, '_')}-${dateStr}.html`;
-      const blob = new Blob([project.html_content], { type: 'text/html; charset=utf-8' });
+      const filename = `rating-${dateStr}.html`;
+      const blob = new Blob([html], { type: 'text/html; charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -1928,8 +1530,6 @@ DIFFERENTIATION ANCHOR:
       URL.revokeObjectURL(url);
     }
 
-    // loadProjects() — deprecated
-    function loadProjects() {}
 
     function escHtml(str) {
       const d = document.createElement('div');
@@ -1937,108 +1537,89 @@ DIFFERENTIATION ANCHOR:
       return d.innerHTML;
     }
 
-    function createProject() {
+    async function createProject() {
       const niche = document.getElementById('niche').value.trim();
-      const geo = document.getElementById('geo').value.trim() || null;
-      const geoRequest = document.getElementById('geoRequest').value.trim() || null;
+      const geo = document.getElementById('geo').value.trim() || '';
+      const geoRequest = document.getElementById('geoRequest').value.trim() || '';
       const queryLang = document.getElementById('queryLang').value;
       const siteLang = document.getElementById('siteLang').value;
       const userCompanyData = document.getElementById('user-company-data')?.value.trim() || '';
 
-      let injectionName = null, injectionUrl = null, injectionInfo = null;
+      let injectionName = '', injectionInfo = '';
       if (userCompanyData) {
         injectionInfo = userCompanyData;
         const lines = userCompanyData.split('\n');
         if (lines[0]) injectionName = lines[0].trim();
-        const urlMatch = userCompanyData.match(/https?:\/\/[^\s]+/);
-        if (urlMatch) injectionUrl = urlMatch[0];
       }
 
-      const id = crypto.randomUUID();
-      const project = {
-        id, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-        niche, geo, geo_request: geoRequest, query_lang: queryLang, site_lang: siteLang,
-        injection_name: injectionName, injection_url: injectionUrl, injection_info: injectionInfo,
-        status: 'in_progress', html_content: null, seo_block: null, counters_block: null, meta: {}
-      };
-
-      const projects = getProjects();
-      projects.unshift(project);
-      saveProjects(projects);
-      currentProjectId = id;
-      return id;
+      try {
+        const resp = await fetch('/api/projects', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            niche, geo, geo_request: geoRequest,
+            query_lang: queryLang, site_lang: siteLang,
+            injection_name: injectionName, injection_info: injectionInfo,
+          }),
+        });
+        const project = await resp.json();
+        currentProjectId = project.id;
+        return project.id;
+      } catch (err) {
+        showNotification('Ошибка создания проекта: ' + err.message, true);
+        return null;
+      }
     }
 
-    function updateProjectMeta(meta) {
+    // updateProjectMeta — server handles this during pipeline
+    function updateProjectMeta() {}
+
+    async function updateProjectStatus(status) {
       if (!currentProjectId) return;
-      const projects = getProjects();
-      const p = projects.find(p => p.id === currentProjectId);
-      if (!p) return;
-      p.meta = { ...p.meta, ...meta };
-      p.updated_at = new Date().toISOString();
-      saveProjects(projects);
+      await fetch(`/api/projects/${currentProjectId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
     }
 
-    function updateProjectStatus(status, htmlContent) {
-      if (!currentProjectId) return;
-      const projects = getProjects();
-      const p = projects.find(p => p.id === currentProjectId);
-      if (!p) return;
-      p.status = status;
-      p.updated_at = new Date().toISOString();
-      if (htmlContent !== undefined) p.html_content = htmlContent;
-      saveProjects(projects);
-    }
-
-    function updateProjectHtml(htmlContent, seoBlock, countersBlock) {
-      if (!currentProjectId) return;
-      const projects = getProjects();
-      const p = projects.find(p => p.id === currentProjectId);
-      if (!p) return;
-      p.html_content = htmlContent;
-      p.updated_at = new Date().toISOString();
-      if (seoBlock !== undefined) p.seo_block = seoBlock;
-      if (countersBlock !== undefined) p.counters_block = countersBlock;
-      saveProjects(projects);
+    async function updateProjectHtml(htmlContent) {
+      if (!currentProjectId || !htmlContent) return;
+      await fetch(`/api/projects/${currentProjectId}/html`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ html: htmlContent }),
+      });
     }
 
     function openProject(id) {
       location.hash = '#/project/' + id;
     }
 
-    function duplicateProject(id) {
-      const projects = getProjects();
-      const orig = projects.find(p => p.id === id);
-      if (!orig) return;
-
-      const copy = JSON.parse(JSON.stringify(orig));
-      copy.id = crypto.randomUUID();
-      copy.created_at = new Date().toISOString();
-      copy.updated_at = new Date().toISOString();
-      copy.niche = copy.niche + ' (копия)';
-      copy.status = 'in_progress';
-
-      projects.unshift(copy);
-      saveProjects(projects);
-
-      const hash = location.hash || '#/';
-      if (hash === '#/' || hash === '#') renderDashboard();
-      showNotification('Проект дублирован');
+    async function duplicateProject(id) {
+      try {
+        await fetch(`/api/projects/${id}/duplicate`, { method: 'POST' });
+        const hash = location.hash || '#/';
+        if (hash === '#/' || hash === '#') renderDashboard();
+        showNotification('Проект дублирован');
+      } catch (err) {
+        showNotification('Ошибка: ' + err.message, true);
+      }
     }
 
-    function deleteProject(id) {
+    async function deleteProject(id) {
       if (!confirm('Удалить проект? Это действие необратимо.')) return;
 
-      let projects = getProjects();
-      projects = projects.filter(p => p.id !== id);
-      saveProjects(projects);
-
-      if (currentProjectId === id) currentProjectId = null;
-
-      const hash = location.hash || '#/';
-      if (hash === '#/' || hash === '#') renderDashboard();
-      if (hash === `#/project/${id}`) location.hash = '#/';
-      showNotification('Проект удалён');
+      try {
+        await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+        if (currentProjectId === id) currentProjectId = null;
+        const hash = location.hash || '#/';
+        if (hash === '#/' || hash === '#') renderDashboard();
+        if (hash === `#/project/${id}`) location.hash = '#/';
+        showNotification('Проект удалён');
+      } catch (err) {
+        showNotification('Ошибка: ' + err.message, true);
+      }
     }
 
     const MODELS = [
@@ -2047,11 +1628,10 @@ DIFFERENTIATION ANCHOR:
       { id: "anthropic/claude-sonnet-4.5", name: "Claude (Sonnet 4.5)" },
     ];
 
-    // Conversation history per model: { [modelId]: [{role, content}] }
+    // Conversation history per model (for interactive chat, populated from SSE)
     const conversations = {};
 
-    // Direct OpenRouter call (no backend needed)
-    // Retry wrapper for network resilience (sleep/wake, flaky connections)
+    // Retry wrapper + callModel kept for interactive chat from UI
     async function withRetry(fn, { retries = 3, baseDelay = 2000, label = '' } = {}) {
       for (let attempt = 0; attempt <= retries; attempt++) {
         try {
@@ -2181,14 +1761,6 @@ DIFFERENTIATION ANCHOR:
     let extractedRatings = [];   // [{name, url, status, errorReason}]
     let downloadedRatings = {};  // {name: {html, text}}
 
-    // Strip HTML to plain text for AI processing
-    function extractText(html) {
-      const doc = new DOMParser().parseFromString(html, 'text/html');
-      doc.querySelectorAll('script, style, svg, noscript, link, meta, header, footer, nav, iframe').forEach(el => el.remove());
-      let text = doc.body?.innerText || '';
-      return text.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+/g, ' ').trim();
-    }
-
     // Render ratings grid
     function renderRatingsGrid() {
       const grid = document.getElementById('ratings-grid');
@@ -2237,109 +1809,7 @@ DIFFERENTIATION ANCHOR:
       wrap.scrollIntoView({ behavior: 'smooth' });
     }
 
-    // CORS proxy list — tried in order, first success wins
-    // Tested 2026-02-18: codetabs works reliably, allorigins/corsproxy.io are down
-    function getProxies(url) {
-      const encoded = encodeURIComponent(url);
-      return [
-        { name: 'codetabs',    url: `https://api.codetabs.com/v1/proxy?quest=${encoded}`, type: 'raw' },
-        { name: 'allorigins',  url: `https://api.allorigins.win/get?url=${encoded}`, type: 'json', field: 'contents' },
-        { name: 'corsproxy',   url: `https://corsproxy.io/?url=${encoded}`, type: 'raw' },
-      ];
-    }
 
-    // Download a single site via CORS proxy (universal — works for companies & ratings)
-    async function downloadSite(url, verbose) {
-      const proxies = getProxies(url);
-      const errors = [];
-
-      for (const proxy of proxies) {
-        try {
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 15000);
-          const start = Date.now();
-
-          const resp = await fetch(proxy.url, { signal: controller.signal });
-          clearTimeout(timeout);
-          const elapsed = Date.now() - start;
-
-          if (!resp.ok) {
-            errors.push({ proxy: proxy.name, error: `HTTP ${resp.status}`, ms: elapsed });
-            continue;
-          }
-
-          let html;
-          if (proxy.type === 'json') {
-            const data = await resp.json();
-            html = data[proxy.field];
-          } else {
-            html = await resp.text();
-          }
-
-          if (!html || html.length < 100) {
-            errors.push({ proxy: proxy.name, error: `пустой/короткий ответ (${(html||'').length} байт)`, ms: elapsed });
-            continue;
-          }
-
-          const text = extractText(html).substring(0, 8000);
-          if (verbose) return { ok: true, html, text, proxy: proxy.name, size: html.length, ms: elapsed, errors };
-          return { ok: true, html, text };
-        } catch (e) {
-          const reason = e.name === 'AbortError' ? 'таймаут 15с' : e.message;
-          errors.push({ proxy: proxy.name, error: reason, ms: null });
-          continue;
-        }
-      }
-
-      const errorStr = errors.map(e => `${e.proxy}: ${e.error}${e.ms ? ` (${e.ms}мс)` : ''}`).join(' → ');
-      return { ok: false, error: errorStr || 'Все прокси недоступны', errors };
-    }
-
-    // Test download from the form
-    async function testDownload() {
-      const url = document.getElementById('testUrl').value.trim();
-      const resultEl = document.getElementById('testResult');
-      if (!url) { resultEl.textContent = 'Введите URL'; return; }
-
-      resultEl.textContent = 'Загрузка...';
-      resultEl.style.color = '#d29922';
-
-      const result = await downloadSite(url, true);
-
-      if (result.ok) {
-        resultEl.style.color = '#238636';
-        resultEl.textContent = `✅ Успех через ${result.proxy} (${result.ms}мс)\nРазмер HTML: ${(result.size / 1024).toFixed(1)} KB | Текст: ${result.text.length} символов`;
-        if (result.errors.length > 0) {
-          resultEl.textContent += `\n⚠️ Другие прокси:\n${result.errors.map(e => `  ✗ ${e.proxy}: ${e.error}${e.ms ? ` (${e.ms}мс)` : ''}`).join('\n')}`;
-        }
-      } else {
-        resultEl.style.color = '#f85149';
-        resultEl.textContent = `❌ Все прокси не сработали:\n${result.errors.map(e => `  ✗ ${e.proxy}: ${e.error}${e.ms ? ` (${e.ms}мс)` : ''}`).join('\n')}`;
-      }
-    }
-
-    // Download a single rating site
-    async function downloadRatingSite(rating, index) {
-      if (!rating.url) {
-        extractedRatings[index].status = 'error';
-        extractedRatings[index].errorReason = 'URL не найден';
-        renderRatingsGrid();
-        return;
-      }
-
-      extractedRatings[index].status = 'loading';
-      renderRatingsGrid();
-
-      const result = await downloadSite(rating.url);
-      if (result.ok) {
-        downloadedRatings[rating.name] = { html: result.html, text: result.text };
-        extractedRatings[index].status = 'done';
-      } else {
-        extractedRatings[index].status = 'error';
-        extractedRatings[index].errorReason = result.error;
-      }
-      renderRatingsGrid();
-    }
 
 
     function switchCanvasTab(tab) {
@@ -2441,16 +1911,18 @@ DIFFERENTIATION ANCHOR:
       head.innerHTML = headHtml;
       syncCanvasRawHtml();
 
-      // Save SEO data to project
+      // Save SEO data to project via API
       const seoData = {};
       ['counterYandex','counterGoogle','metaYandex','metaGoogle','metaTitle','metaDesc','metaKeywords','metaOgImage'].forEach(f => {
         const el = document.getElementById(f);
         if (el) seoData[f] = el.value;
       });
       if (currentProjectId) {
-        const projects = getProjects();
-        const p = projects.find(p => p.id === currentProjectId);
-        if (p) { p.seo_block = JSON.stringify(seoData); p.updated_at = new Date().toISOString(); saveProjects(projects); }
+        fetch(`/api/projects/${currentProjectId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ seo_block: JSON.stringify(seoData) }),
+        }).catch(() => {});
       }
 
       showNotification('Счётчики и мета-теги применены');
@@ -3493,872 +2965,232 @@ ${userComment}
       renderCard(modelId);
     }
 
-    // === Pipeline Execution ===
+    // === Pipeline Execution (server-side via SSE) ===
     let pipelineRunning = false;
+    let eventSource = null;
 
     async function runPipeline(projectId, startFrom = null) {
       if (pipelineRunning) return showNotification('Пайплайн уже запущен', true);
-      pipelineRunning = true;
 
-      const project = getProjects().find(p => p.id === projectId);
-      if (!project) { pipelineRunning = false; return; }
-
-      currentProjectId = projectId;
-      const apiKey = localStorage.getItem("openrouter_key");
-      if (!apiKey) { pipelineRunning = false; return alert("Нет API-ключа OpenRouter. Создайте новый проект."); }
-
-      // Extract params from project
-      const { niche, geo, geo_request, query_lang, site_lang } = project;
-      const geoStr = geo ? ` в ${geo}` : '';
-      const geoRequestStr = geo_request ? `Отвечай с перспективы пользователя, который находится в ${geo_request}` : '';
-      const queryLangStr = `Отвечай на языке: ${query_lang || 'Русский'}`;
-      const siteLangStr = `Весь контент сайта на языке: ${site_lang || 'Русский'}`;
-      const contextBlock = (geoRequestStr ? `\nКОНТЕКСТ ЛОКАЦИИ: ${geoRequestStr}` : '') + `\nЯЗЫК ОТВЕТА: ${queryLangStr}`;
+      const apiKey = localStorage.getItem('openrouter_key');
+      if (!apiKey) return alert('Нет API-ключа OpenRouter');
 
       // Hide resume bar
       const resumeBar = document.getElementById('project-resume-bar');
       if (resumeBar) resumeBar.innerHTML = '';
 
-      // Determine which steps to run
-      const stepOrder = PIPELINE_STEPS.map(s => s.id);
-      let startIdx = 0;
-      let grokCriteriaRaw = "";
-      let grokAudienceRaw = "";
+      const resp = await fetch(`/api/projects/${projectId}/pipeline/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey, startFrom }),
+      });
 
-      if (startFrom) {
-        startIdx = stepOrder.indexOf(startFrom);
-        if (startIdx < 0) startIdx = 0;
-        // Restore state from project meta for resume
-        if (project.meta) {
-          if (project.meta.conversations) Object.assign(conversations, project.meta.conversations);
-          if (project.meta.compilerRawXml) compilerRawXml = project.meta.compilerRawXml;
-          if (project.meta.grokCriteriaRaw) grokCriteriaRaw = project.meta.grokCriteriaRaw;
-          if (project.meta.grokAudienceRaw) grokAudienceRaw = project.meta.grokAudienceRaw;
-          if (project.meta.extractedRatings) extractedRatings = project.meta.extractedRatings;
-          if (project.meta.downloadedRatings) downloadedRatings = project.meta.downloadedRatings;
-          // designSystemRaw is restored in the step_design block's else-branch
-        }
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ error: 'Ошибка запуска' }));
+        return showNotification(err.error || 'Ошибка запуска', true);
       }
 
-      const resultsDiv = document.getElementById("results");
+      pipelineRunning = true;
+      connectPipelineSSE(projectId);
+    }
 
-      try {
+    async function stopPipeline(projectId) {
+      await fetch(`/api/projects/${projectId}/pipeline/stop`, { method: 'POST' });
+    }
 
-      // === STEP 1-2: Three models parallel (companies + criteria) ===
-      if (startIdx <= 0) {
-        updateTimelineStep('step_1_2', 'running');
+    function connectPipelineSSE(projectId) {
+      if (eventSource) eventSource.close();
+      eventSource = new EventSource(`/api/projects/${projectId}/pipeline/events`);
 
-        const prompt1 = `Составь список 30 ${niche}${geoStr}${contextBlock}`;
-        const prompt2 = `Почему именно эти сервисы были поставлены в ТОП. 1. Составь список критериев, по которым ты оценивал сайты 2. Разгруппируй эти критерии на смысловые группы 3. Отранжируй эти критерии в порядке уменьшения веса влияния на место в рейтинге${contextBlock}`;
+      eventSource.addEventListener('step_start', (e) => {
+        const { step } = JSON.parse(e.data);
+        updateTimelineStep(step, 'running');
+        showStepSection(step);
+      });
 
-        for (const model of MODELS) {
-          conversations[model.id] = [{ role: "user", content: prompt1 }];
+      eventSource.addEventListener('step_progress', (e) => {
+        const { step, message } = JSON.parse(e.data);
+        updateStepProgress(step, message);
+      });
+
+      eventSource.addEventListener('step_done', (e) => {
+        const d = JSON.parse(e.data);
+        updateTimelineStep(d.step, 'done');
+        if (d.data) renderStepResult(d.step, d.data);
+      });
+
+      eventSource.addEventListener('step_error', (e) => {
+        const { step, error } = JSON.parse(e.data);
+        updateTimelineStep(step, 'error');
+        showNotification(`Ошибка на шаге: ${error}`, true);
+      });
+
+      eventSource.addEventListener('pipeline_done', () => {
+        pipelineRunning = false;
+        showNotification('Пайплайн завершён');
+        if (eventSource) { eventSource.close(); eventSource = null; }
+        refreshProject(currentProjectId);
+      });
+
+      eventSource.addEventListener('pipeline_error', (e) => {
+        const { error } = JSON.parse(e.data);
+        pipelineRunning = false;
+        showNotification(`Ошибка пайплайна: ${error}`, true);
+        if (eventSource) { eventSource.close(); eventSource = null; }
+      });
+
+      eventSource.addEventListener('pipeline_stopped', () => {
+        pipelineRunning = false;
+        showNotification('Пайплайн остановлен');
+        if (eventSource) { eventSource.close(); eventSource = null; }
+      });
+    }
+
+    function showStepSection(step) {
+      const map = {
+        'step_3': 'grok-section',
+        'step_4': 'audience-section',
+        'step_design': 'design-section',
+        'step_5': 'compiler-section',
+        'step_6': 'canvas-section',
+        'step_7': 'ratings-section',
+        'step_8_web': 'ratings-section',
+        'step_fill': 'fill-section',
+      };
+      const id = map[step];
+      if (id) {
+        const el = document.getElementById(id);
+        if (el) { el.style.display = ''; el.scrollIntoView({ behavior: 'smooth' }); }
+      }
+      // Show loading states
+      if (step === 'step_3') {
+        const m = document.getElementById('grok-messages');
+        if (m) m.innerHTML = '<div class="loading"><div class="spinner"></div>Grok анализирует критерии...</div>';
+      } else if (step === 'step_4') {
+        const m = document.getElementById('audience-messages');
+        if (m) m.innerHTML = '<div class="loading"><div class="spinner"></div>Grok анализирует аудитории...</div>';
+      } else if (step === 'step_5') {
+        const m = document.getElementById('compiler-messages');
+        if (m) m.innerHTML = '<div class="loading"><div class="spinner"></div>Claude компилирует XML...</div>';
+      } else if (step === 'step_6') {
+        const l = document.getElementById('canvas-loading');
+        if (l) l.style.display = 'flex';
+        const t = document.getElementById('canvas-toolbar');
+        if (t) t.style.display = 'none';
+      } else if (step === 'step_7') {
+        const l = document.getElementById('ratings-loading');
+        if (l) l.style.display = 'flex';
+      } else if (step === 'step_fill') {
+        const l = document.getElementById('fill-loading');
+        if (l) l.style.display = 'flex';
+      }
+    }
+
+    function updateStepProgress(step, message) {
+      if (step === 'step_8_web') {
+        const p = document.getElementById('ratings-progress');
+        if (p) p.textContent = message;
+      } else if (step === 'step_1_2') {
+        // Show progress in results area
+        const r = document.getElementById('results');
+        if (r && !r.querySelector('.result-card')) {
+          r.innerHTML = `<div class="loading"><div class="spinner"></div>${message}</div>`;
         }
+      }
+    }
 
-        resultsDiv.innerHTML = MODELS.map(m => {
-          const badgeClass = getBadgeClass(m.id);
-          const badgeLabel = getBadgeLabel(m.id);
-          return `
+    function renderStepResult(step, data) {
+      if (step === 'step_1_2' && data.conversations) {
+        Object.assign(conversations, data.conversations);
+        const resultsDiv = document.getElementById('results');
+        if (resultsDiv) {
+          resultsDiv.innerHTML = MODELS.map(m => `
             <div class="result-card" id="card-${CSS.escape(m.id)}">
               <div class="result-header">
-                <span class="model-badge ${badgeClass}">${badgeLabel}</span>
+                <span class="model-badge ${getBadgeClass(m.id)}">${getBadgeLabel(m.id)}</span>
                 <span class="model-name">${m.name}</span>
               </div>
-              <div class="loading"><div class="spinner"></div>${badgeLabel} думает... (запрос 1/2)</div>
-            </div>`;
-        }).join("");
-
-        const promises = MODELS.map(async (model) => {
-          try {
-            const data1 = await callModel(model.id, conversations[model.id], apiKey);
-            if (data1.error) {
-              conversations[model.id].push({ role: "assistant", content: `[Ошибка] ${data1.error}` });
-              renderCard(model.id);
-              return;
-            }
-            conversations[model.id].push({ role: "assistant", content: data1.content });
-          } catch (err) {
-            conversations[model.id].push({ role: "assistant", content: `[Ошибка] ${err.message}` });
-            renderCard(model.id);
-            return;
-          }
-
-          renderCard(model.id);
-          const msgsEl = document.getElementById(`msgs-${CSS.escape(model.id)}`);
-          if (msgsEl) {
-            const loadingDiv = document.createElement("div");
-            loadingDiv.className = "chat-msg chat-msg-user";
-            loadingDiv.innerHTML = `<div class="chat-msg-label">Вы (авто)</div><div style="color:#8b949e"><span class="spinner-small"></span> Отправляю запрос 2/2...</div>`;
-            msgsEl.appendChild(loadingDiv);
-            msgsEl.scrollTop = msgsEl.scrollHeight;
-          }
-
-          conversations[model.id].push({ role: "user", content: prompt2 });
-
-          try {
-            const data2 = await callModel(model.id, conversations[model.id], apiKey);
-            if (data2.error) {
-              conversations[model.id].push({ role: "assistant", content: `[Ошибка] ${data2.error}` });
-            } else {
-              conversations[model.id].push({ role: "assistant", content: data2.content });
-            }
-          } catch (err) {
-            conversations[model.id].push({ role: "assistant", content: `[Ошибка] ${err.message}` });
-          }
-
-          renderCard(model.id);
-        });
-
-        await Promise.all(promises);
-        updateTimelineStep('step_1_2', 'done');
-        updateProjectMeta({ currentStep: 'step_1_2', conversations, resultsHtml: resultsDiv.innerHTML });
-      }
-
-      // === STEP 3: Grok criteria deduplication ===
-      if (startIdx <= 1) {
-        updateTimelineStep('step_3', 'running');
-
-        const criteriaBlocks = MODELS.map(m => {
-          const msgs = conversations[m.id] || [];
-          const lastAssistant = [...msgs].reverse().find(msg => msg.role === "assistant");
-          return `=== ${m.name} ===\n${lastAssistant?.content || "(нет ответа)"}`;
-        }).join("\n\n");
-
-        const grokPrompt = `ЯЗЫК ОТВЕТА: ${queryLangStr}
-
-Представь, что ты человек, который провел ресерч данной ниши и тебе необходимо составить собственный рейтинг, который будет оценивать каждую компанию по определенным критериям.
-
-Тебе необходимо выполнить смысловую дедупликацию критериев
-Составить итоговую таблицу с критериями (В первом столбце критерий, а во втором столбце методология его оценки)
-При разборе запрещается пропускать критерии
-
-ВАЖНО: В ответе выведи ТОЛЬКО итоговую таблицу. Без вступления, без пояснений, без заключения. Только таблица.
-
-Список критериев ниже:
-<data>
-${criteriaBlocks}
-</data>`;
-
-        const grokSection = document.getElementById("grok-section");
-        const grokMessages = document.getElementById("grok-messages");
-        grokSection.style.display = "block";
-        grokMessages.innerHTML = `<div class="loading"><div class="spinner"></div>Grok анализирует критерии...</div>`;
-        grokSection.scrollIntoView({ behavior: "smooth" });
-
-        try {
-          const grokData = await callModel("x-ai/grok-4", [{ role: "user", content: grokPrompt }], apiKey);
-          if (grokData.error) {
-            grokMessages.innerHTML = `<div class="chat-msg chat-msg-assistant"><div class="chat-msg-label">Grok</div><div class="error-text">[Ошибка] ${grokData.error}</div></div>`;
+              <div class="chat-messages" id="msgs-${CSS.escape(m.id)}"></div>
+              <div class="chat-input-wrap"><input type="text" id="input-${CSS.escape(m.id)}" placeholder="Дополнительный вопрос..." onkeydown="if(event.key==='Enter')chatSend('${m.id}')"><button onclick="chatSend('${m.id}')">Отправить</button></div>
+            </div>`).join('');
+          MODELS.forEach(m => renderCard(m.id));
+        }
+      } else if (step === 'step_3' && data.grokCriteriaRaw) {
+        const msgs = document.getElementById('grok-messages');
+        if (msgs) {
+          const tableHtml = mdTableToHtml(data.grokCriteriaRaw);
+          const rendered = tableHtml
+            ? `<div class="grok-table-wrap">${tableHtml}</div>`
+            : `<div style="white-space:pre-wrap">${data.grokCriteriaRaw}</div>`;
+          msgs.innerHTML = `<div class="chat-msg chat-msg-assistant" style="padding:20px;">${rendered}</div>`;
+        }
+      } else if (step === 'step_4' && data.grokAudienceRaw) {
+        const msgs = document.getElementById('audience-messages');
+        if (msgs) {
+          const parsed = parseAudienceResponse(data.grokAudienceRaw);
+          if (parsed) {
+            msgs.innerHTML = `<div class="chat-msg chat-msg-assistant" style="padding:20px;"><div class="grok-table-wrap">${parsed.tableHtml}</div>${parsed.portraitsHtml}</div>`;
           } else {
-            grokCriteriaRaw = grokData.content;
-            const tableHtml = mdTableToHtml(grokData.content);
-            const rendered = tableHtml
-              ? `<div class="grok-table-wrap">${tableHtml}</div>`
-              : `<div style="white-space:pre-wrap">${grokData.content}</div>`;
-            grokMessages.innerHTML = `
-              <div class="chat-msg chat-msg-assistant" style="padding:20px;">
-                ${rendered}
-              </div>`;
+            msgs.innerHTML = `<div class="chat-msg chat-msg-assistant" style="padding:20px;"><div style="white-space:pre-wrap">${data.grokAudienceRaw}</div></div>`;
           }
-        } catch (err) {
-          grokMessages.innerHTML = `<div class="chat-msg chat-msg-assistant"><div class="chat-msg-label">Grok</div><div class="error-text">[Ошибка] ${err.message}</div></div>`;
         }
-
-        updateTimelineStep('step_3', 'done');
-        updateProjectMeta({ currentStep: 'step_3', grokCriteriaRaw, grokCriteriaHtml: grokMessages.innerHTML });
-      }
-
-      // === STEP 4: Grok audience analysis ===
-      if (startIdx <= 2) {
-        updateTimelineStep('step_4', 'running');
-
-        const audiencePrompt = `ЯЗЫК ОТВЕТА: ${queryLangStr}
-
-Ты — маркетолог-аналитик и UX-специалист. Тебе дана ниша: "${niche}".
-
-Смоделируй 4 сегмента целевой аудитории для компаний в этой нише.
-
-Для каждого сегмента ЦА составь подробный список их болей, вопросов и интентов (не менее 15–20 пунктов).
-
-Ответ выведи в два блока:
-
-БЛОК 1 — markdown-таблица с двумя столбцами. Каждая боль/интент — ОТДЕЛЬНАЯ строка.
-
-| ЦА | Боль / Интент |
-|---|---|
-| Малый бизнес | Хочу понять стоимость до покупки |
-| Малый бизнес | Боюсь сложной интеграции |
-| Корпорации | Нужна масштабируемость |
-
-БЛОК 2 — после таблицы, через разделитель "---", выведи краткие портреты каждой ЦА в формате:
-
----
-**Малый бизнес:** Владелец компании до 50 чел., ищет автоматизацию...
-**Корпорации:** IT-директор крупной компании...
-
-Без вступления и заключения.`;
-
-        const audienceSection = document.getElementById("audience-section");
-        const audienceMessages = document.getElementById("audience-messages");
-        audienceSection.style.display = "block";
-        audienceMessages.innerHTML = `<div class="loading"><div class="spinner"></div>Grok анализирует аудитории...</div>`;
-        audienceSection.scrollIntoView({ behavior: "smooth" });
-
-        try {
-          const audData = await callModel("x-ai/grok-4", [{ role: "user", content: audiencePrompt }], apiKey);
-          if (audData.error) {
-            audienceMessages.innerHTML = `<div class="chat-msg chat-msg-assistant"><div class="chat-msg-label">Grok</div><div class="error-text">[Ошибка] ${audData.error}</div></div>`;
-          } else {
-            grokAudienceRaw = audData.content;
-            const parsed = parseAudienceResponse(audData.content);
-            if (parsed) {
-              audienceMessages.innerHTML = `
-                <div class="chat-msg chat-msg-assistant" style="padding:20px;">
-                  <div class="grok-table-wrap">${parsed.tableHtml}</div>
-                  ${parsed.portraitsHtml}
-                </div>`;
-            } else {
-              audienceMessages.innerHTML = `
-                <div class="chat-msg chat-msg-assistant" style="padding:20px;">
-                  <div style="white-space:pre-wrap">${audData.content}</div>
-                </div>`;
-            }
-          }
-        } catch (err) {
-          audienceMessages.innerHTML = `<div class="chat-msg chat-msg-assistant"><div class="chat-msg-label">Grok</div><div class="error-text">[Ошибка] ${err.message}</div></div>`;
+      } else if (step === 'step_design' && data.designSystemRaw) {
+        const msgs = document.getElementById('design-messages');
+        if (msgs) {
+          const note = data.designQuery ? `<div style="margin-bottom:12px; padding:8px 12px; background:#1a1f35; border-radius:6px; font-size:12px; color:#7ee787;">Запрос BM25: "${data.designQuery}"</div>` : '';
+          msgs.innerHTML = `<div class="chat-msg chat-msg-assistant" style="padding:20px"><div class="chat-msg-label">Design System (BM25)</div>${note}<div style="white-space:pre-wrap; font-size:12px; color:#8b949e">${data.designSystemRaw.replace(/</g, '&lt;')}</div></div>`;
         }
-
-        updateTimelineStep('step_4', 'done');
-        updateProjectMeta({ currentStep: 'step_4', grokCriteriaRaw, grokAudienceRaw, audienceHtml: audienceMessages.innerHTML });
-      }
-
-      // === STEP DESIGN: Generate design system via BM25 ===
-      let designSystemRaw = '';
-
-      if (startIdx <= 3) {
-        updateTimelineStep('step_design', 'running');
-        const designSection = document.getElementById('design-section');
-        if (designSection) designSection.style.display = '';
-
-        try {
-          // Translate niche to English if it contains Cyrillic (CSV data is in English)
-          let designQuery = niche + ' ' + (geo || '');
-          if (/[а-яёА-ЯЁ]/.test(designQuery)) {
-            try {
-              const translateResp = await callModel(
-                'google/gemini-2.0-flash-001',
-                [{ role: 'user', content: `Translate this business niche to English in 2-4 keywords. Only output keywords, nothing else: ${niche} ${geo || ''}` }],
-                apiKey
-              );
-              const translated = translateResp.trim();
-              if (translated && !/error|sorry|не могу/i.test(translated)) {
-                console.log(`[step_design] Translated niche: "${niche} ${geo || ''}" → "${translated}"`);
-                designQuery = translated;
-              }
-            } catch (translateErr) {
-              console.warn('[step_design] Niche translation failed, using original:', translateErr.message);
-            }
-          }
-
-          const ds = await generateDesignSystem(designQuery, niche);
-          designSystemRaw = formatDesignSystemForPrompt(ds);
-
-          const designMessages = document.getElementById('design-messages');
-          if (designMessages) {
-            const translationNote = designQuery !== (niche + ' ' + (geo || ''))
-              ? `<div style="margin-bottom:12px; padding:8px 12px; background:#1a1f35; border-radius:6px; font-size:12px; color:#7ee787;">🔤 Перевод для BM25: "${niche} ${geo || ''}" → "${designQuery}"</div>`
-              : '';
-            designMessages.innerHTML = `
-              <div class="chat-msg chat-msg-assistant" style="padding:20px">
-                <div class="chat-msg-label">Design System (BM25)</div>
-                ${translationNote}
-                <div style="white-space:pre-wrap; font-size:12px; color:#8b949e">${designSystemRaw.replace(/</g, '&lt;')}</div>
-              </div>`;
-          }
-
-          updateTimelineStep('step_design', 'done');
-          updateProjectMeta({ currentStep: 'step_design', designSystemRaw });
-        } catch (err) {
-          console.warn('Design system generation failed, using fallback:', err);
-          designSystemRaw = DEFAULT_DESIGN_SYSTEM;
-
-          const designMessages = document.getElementById('design-messages');
-          if (designMessages) {
-            designMessages.innerHTML = `
-              <div class="chat-msg chat-msg-assistant" style="padding:20px">
-                <div class="chat-msg-label">Design System (fallback)</div>
-                <div style="white-space:pre-wrap; font-size:12px; color:#f0883e">[Ошибка загрузки дизайн-данных: ${err.message}]\nИспользуется дизайн-система по умолчанию.</div>
-              </div>`;
-          }
-
-          updateTimelineStep('step_design', 'done');
-          updateProjectMeta({ currentStep: 'step_design', designSystemRaw });
+      } else if (step === 'step_5' && data.compilerRawXml) {
+        compilerRawXml = data.compilerRawXml;
+        const msgs = document.getElementById('compiler-messages');
+        if (msgs) {
+          msgs.innerHTML = `<div class="chat-msg chat-msg-assistant" style="padding:20px;"><button class="copy-btn" onclick="navigator.clipboard.writeText(compilerRawXml).then(()=>{this.textContent='Скопировано!';setTimeout(()=>this.textContent='Копировать XML',1500)})">Копировать XML</button><div class="xml-output">${highlightXml(data.compilerRawXml)}</div></div>`;
         }
-      } else if (project.meta?.designSystemRaw) {
-        designSystemRaw = project.meta.designSystemRaw;
+      } else if (step === 'step_6') {
+        refreshProjectHtml(currentProjectId);
+      } else if (step === 'step_7' && data.extractedRatings) {
+        extractedRatings = data.extractedRatings;
+        const l = document.getElementById('ratings-loading');
+        if (l) l.style.display = 'none';
+        renderRatingsGrid();
+      } else if (step === 'step_8_web' && data.extractedRatings) {
+        extractedRatings = data.extractedRatings;
+        renderRatingsGrid();
+      } else if (step === 'step_fill') {
+        const fl = document.getElementById('fill-loading');
+        if (fl) fl.style.display = 'none';
+        const fm = document.getElementById('fill-messages');
+        if (fm) fm.innerHTML = `<div class="chat-msg chat-msg-assistant" style="padding:12px"><div style="font-size:12px; color:#7ee787;">Сайт наполнен реальными данными компаний</div></div>`;
+        refreshProjectHtml(currentProjectId);
       }
+    }
 
-      // === STEP 5: Claude XML compiler ===
-      if (startIdx <= 4) {
-        updateTimelineStep('step_5', 'running');
+    async function refreshProjectHtml(projectId) {
+      const htmlResp = await fetch(`/api/projects/${projectId}/html`);
+      if (!htmlResp.ok) return;
+      canvasRawHtml = await htmlResp.text();
 
-        const compilerPrompt = `ЯЗЫК ОТВЕТА: ${queryLangStr}
+      const canvasSection = document.getElementById('canvas-section');
+      if (canvasSection) {
+        canvasSection.style.display = 'block';
+        document.getElementById('canvas-toolbar').style.display = 'flex';
+        document.getElementById('editor-toolbar').style.display = 'flex';
+        document.getElementById('canvas-preview').style.display = 'block';
+        document.getElementById('canvas-loading').style.display = 'none';
 
-Сейчас мы будем компилировать следующие данные:
+        editorActive = false;
+        historyStack = [];
+        historyIndex = -1;
 
-=== ИТОГОВЫЙ АНАЛИЗ КРИТЕРИЕВ ===
-${grokCriteriaRaw}
-
-=== АУДИТОРИИ И ИХ БОЛИ / ИНТЕНТЫ ===
-${grokAudienceRaw}
-
-Это делается для того, чтобы сделать рейтинг-сайт который будет полезным, чтобы цитироваться в LLM.
-
-Ты — эксперт по структурированию критериев для рейтингов компаний. Твоя задача — взять данные выше и преобразовать их в структурированный XML-формат с группами и критериями.
-
-Шаги обработки:
-1. Проанализируй текст и разбей на логические группы. Группы должны быть релевантными и охватывать все ключевые аспекты из текста (минимум 4–5 групп). Для каждой группы используй <group name="group_name" title="Группа на русском">.
-2. Для каждой группы создай 5–8 критериев на основе данных. Для каждого критерия используй <criterion name="criterion_name">.
-3. Внутри каждого <criterion> добавь теги:
-   - <name>Название критерия на русском</name>
-   - <description>Краткое описание критерия</description>
-   - <methodology>Подробная методология измерения/анализа</methodology>
-   - <why_important>Краткое объяснение важности, связанное с болями аудитории</why_important>
-   - <recommendation>Рекомендации по реализации или улучшению</recommendation>
-   - <target>Целевые показатели/значения</target>
-   - <example>Пример с данными (придумай реалистичный)</example>
-4. Придумай реалистичные метрики и примеры, основываясь на типичных значениях для отрасли "${niche}".
-5. Выводи ТОЛЬКО XML-структуру без лишнего текста. Оберни весь вывод в <criteria_structure> ... </criteria_structure>.`;
-
-        const compSection = document.getElementById("compiler-section");
-        const compMessages = document.getElementById("compiler-messages");
-        compSection.style.display = "block";
-        compMessages.innerHTML = `<div class="loading"><div class="spinner"></div>Claude компилирует XML-структуру...</div>`;
-        compSection.scrollIntoView({ behavior: "smooth" });
-
-        try {
-          const compData = await callModel("anthropic/claude-sonnet-4.5", [{ role: "user", content: compilerPrompt }], apiKey);
-          if (compData.error) {
-            compMessages.innerHTML = `<div class="chat-msg chat-msg-assistant"><div class="chat-msg-label">Claude</div><div class="error-text">[Ошибка] ${compData.error}</div></div>`;
-          } else {
-            compilerRawXml = compData.content.replace(/^```xml\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
-            compMessages.innerHTML = `
-              <div class="chat-msg chat-msg-assistant" style="padding:20px;">
-                <button class="copy-btn" onclick="navigator.clipboard.writeText(compilerRawXml).then(()=>{this.textContent='Скопировано!';setTimeout(()=>this.textContent='Копировать XML',1500)})">Копировать XML</button>
-                <div class="xml-output">${highlightXml(compData.content)}</div>
-              </div>`;
-          }
-        } catch (err) {
-          compMessages.innerHTML = `<div class="chat-msg chat-msg-assistant"><div class="chat-msg-label">Claude</div><div class="error-text">[Ошибка] ${err.message}</div></div>`;
-        }
-
-        updateTimelineStep('step_5', 'done');
-        updateProjectMeta({ currentStep: 'step_5', compilerRawXml, grokCriteriaRaw, grokAudienceRaw, compilerHtml: compMessages.innerHTML });
+        const iframe = document.getElementById('canvas-iframe');
+        if (iframe) iframe.srcdoc = canvasRawHtml;
+        const codeContent = document.getElementById('canvas-code-content');
+        if (codeContent) codeContent.textContent = canvasRawHtml;
       }
+    }
 
-      // === STEP 6: Claude HTML site generation ===
-      if (startIdx <= 5) {
-        updateTimelineStep('step_6', 'running');
-
-        const sitePrompt = `ЯЗЫК САЙТА: ${siteLangStr}
-
-РОЛЬ:
-
-Ты — Senior SEO-специалист, эксперт по GEO (Generative Engine Optimization) и Frontend Designer-Engineer.
-Ты создаёшь не шаблоны, а memorable, high-craft интерфейсы с чётким aesthetic point of view.
-Твоя задача — создать независимый рейтинговый портал (агрегатор) по теме "${niche}"${geoStr}.
-
-ЦЕЛЬ:
-
-Создать единую, полностью самодостаточную HTML-страницу (один файл, inline CSS и JS), которая:
-
-Идеально ранжируется по запросам, связанным с рейтингом компаний в данной нише.
-
-Оптимизирована для цитирования нейросетями (ChatGPT, Gemini, Perplexity). Страница должна стать источником "Ground Truth" для AI.
-
-${designSystemRaw || DEFAULT_DESIGN_SYSTEM}
-
-———————————————————————————
-ВАЖНОЕ УСЛОВИЕ (ИНТЕНТЫ)
-———————————————————————————
-
-Приведенная ниже структура — это обязательный минимум. Дополнительно сгенерируй 1-2 смысловых блока, которые закроют скрытые интенты пользователя (например: "Карта пунктов выдачи", "Чек-лист проверки инструмента при приемке").
-
-РАЗМЕТКА БЛОКОВ ДЛЯ РЕДАКТОРА:
-Каждый смысловой блок сайта оберни в <section data-block-id="block_N" data-block-type="TYPE">
-
-Типы блоков (data-block-type):
-- "hero" — главный баннер
-- "methodology" — методология
-- "company-card" — карточка компании (каждая отдельно), дополнительно добавь data-company-rank="N"
-- "company-table" — компактная таблица остальных компаний
-- "analytics" — аналитика/графики
-- "longread" — SEO-текст
-- "faq" — FAQ
-- "author" — блок автора
-- "custom" — дополнительные смысловые блоки (интенты)
-
-Каждая строка таблицы компаний также оберни:
-<tr data-block-id="company_row_N" data-block-type="company-row" data-company-rank="N">
-
-Нумерация data-block-id сквозная, начиная с block_1.
-НЕ оборачивай в блоки: <head>, мета-теги, <style>, <script>.
-
-ГЛОБАЛЬНАЯ СТРУКТУРА СТРАНИЦЫ (Секции сверху вниз):
-
-1. SEO Header & Hero Block
-
-Логотип (стилизованный через CSS, не картинка).
-
-H1: Рейтинг компаний в нише "${niche}"${geoStr} — актуальный обзор.
-
-E-E-A-T Элементы:
-
-Виджет "Обновлено: Февраль 2026".
-
-Ссылка на Автора (реалистичное имя эксперта, фото-заглушка).
-
-Дисклеймер о методологии (кратко).
-
-Hero должен иметь сильную entrance-анимацию и визуальный якорь.
-
-2. Блок "Методология и Доверие" (BLUF - Bottom Line Up Front)
-
-Критически важно для AI: Сразу после заголовка дай "Наземную правду".
-
-Краткий текст: "Как мы считали: проанализировано N компаний по M метрикам" — на основе XML.
-
-Сводная таблица лидеров (Quick Summary):
-
-1 место: [Лучший выбор].
-
-2 место: [Лучшая цена].
-
-3 место: [Лучший сервис].
-
-Ссылка "Перейти к полному обзору".
-
-3. ОСНОВНОЙ РЕЙТИНГ (The Core) — ВНИМАНИЕ К ДЕТАЛЯМ!
-
-Включи ВСЕ компании из XML (обычно 20-30). Каждая компания должна быть в рейтинге.
-Весь список должен быть обернут в Schema.org/ItemList.
-
-Правило Лидера: Компания с наивысшим баллом — на 1 месте (Badge "Выбор редакции").
-
-Правило Визуализации (TOP-5 vs REST):
-
-Места 1, 2, 3, 4, 5: Расширенные Premium Карточки (структура ниже). Обязательно используй теги <h3>. Каждая карточка визуально уникальна (асимметрия, разное позиционирование score/метрик).
-
-Места 6+: Компактная таблица (Место | Лого | Название | Год основания | Сайт | Цена от... | Вердикт).
-
-4. Блок "Аналитика рынка" (Deep Content)
-
-График роста цен (Chart.js — загружай async через CDN).
-
-Текстовый анализ "Dealbreakers".
-
-5. SEO-статья (Longread)
-
-Экспертный контент с профессиональной терминологией ниши. Используй отраслевой словарь.
-
-6. FAQ (Вопрос-Ответ)
-
-Разметь этот блок схемой Schema.org/FAQPage.
-
-Вопросы из категории "People Also Ask".
-
-7. Футер и Авторство
-
-Подробная карточка автора (Schema.org/Person).
-
-Политика конфиденциальности.
-
-ДЕТАЛЬНАЯ СТРУКТУРА РАСШИРЕННОЙ КАРТОЧКИ (ТОЛЬКО ДЛЯ TOP-5)
-
-Каждая карточка — это отдельный <article itemscope itemtype="https://schema.org/Product">.
-
-1. Header Карточки
-
-<h3>Название компании</h3> + Бейдж "Верифицировано".
-
-Мета: Локация, Год основания, Парк техники.
-
-CTA Кнопка: "Перейти на сайт" (с атрибутом rel="nofollow"). Кнопка со стилизованным hover-эффектом.
-
-2. Score & AI Summary (Ground Truth)
-
-Общий балл (X.X/10) — визуализирован как кастомный элемент (не просто цифра, а progress ring или styled badge).
-
-AI Summary: Факты, а не вода. Конкретные цифры.
-
-3. Блок "Dealbreakers" (Для AI-Refinements)
-
-Лучше всего подходит для: (конкретные сегменты ЦА).
-
-Может не подойти, если: (конкретные ограничения).
-
-4. Сетка Метрик
-
-Прогресс-бар для каждой метрики из XML (кастомный дизайн, не браузерный <progress>).
-
-Теги преимуществ.
-
-Цены и Условия.
-
-5. Кейс и Отзыв
-
-Кейс: Проблема -> Решение -> Результат.
-
-Отзыв: Цитата с разметкой Schema.org/Review.
-
-ТЕХНИЧЕСКИЕ ТРЕБОВАНИЯ:
-
-1. Микроразметка (Schema.org) — ОБЯЗАТЕЛЬНО
-
-Внедри JSON-LD для: ItemList, Organization (для каждой компании: name, url, aggregateRating), FAQPage, Person, Article.
-
-ПРАВИЛА Schema.org JSON-LD:
-- FAQPage: один блок <script type="application/ld+json"> с @type: "FAQPage" и mainEntity: массив Question. НЕ создавай отдельные JSON-LD блоки для каждого Question — они должны быть ТОЛЬКО внутри FAQPage.mainEntity.
-- Person: один блок. Если автор упоминается в Article и в Footer — используй @id и ссылайся на него, не дублируй.
-- Каждый JSON-LD блок — отдельный <script type="application/ld+json">. Но сущности НЕ дублируются между блоками.
-
-2. Структура и Код (Mobile-First)
-
-Используй семантические теги: <main>, <article>, <section>, <aside>, <time>.
-
-Core Web Vitals: Код должен быть легким. НЕ используй Tailwind — пиши чистый modern CSS с custom properties и CSS Grid/Flexbox. Chart.js (CDN async).
-
-Шрифты: подключи выбранную пару через Google Fonts CDN.
-
-CSS-first анимации. Framer Motion и подобные библиотеки запрещены.
-
-Accessible by default: contrast ratio, focus states, keyboard navigation.
-
-3. Контент (E-E-A-T)
-
-Факты: Используй цифры, проценты, конкретные сроки. Избегай прилагательных "лучший", "качественный" без доказательств.
-
-Словарь: Используй профессиональную терминологию ниши.
-
-4. ВЕСЬ КОД В ОДНОМ HTML-ФАЙЛЕ. Inline styles и scripts допустимы.
-
-5. ЗАЩИТНЫЕ МАРКЕРЫ В <head>:
-Добавь в <head> пустые маркеры для внешних счётчиков и мета-тегов:
-<!-- PROTECTED:SEO:START --><!-- PROTECTED:SEO:END -->
-<!-- PROTECTED:COUNTERS:START --><!-- PROTECTED:COUNTERS:END -->
-НЕ помещай свои мета-теги (og:title, description и т.д.) между этими маркерами.
-Маркеры должны быть ПОСЛЕ всех твоих мета-тегов и ПЕРЕД </head>.
-
-6. Выведи ТОЛЬКО HTML-код. Без пояснений, без markdown, без тройных бэктиков. Просто чистый HTML начиная с <!DOCTYPE html>.
-
-ВХОДНЫЕ ДАННЫЕ (XML):
-
-${compilerRawXml}`;
-
-        const canvasSection = document.getElementById("canvas-section");
-        const canvasLoading = document.getElementById("canvas-loading");
-        const canvasToolbar = document.getElementById("canvas-toolbar");
-        const canvasPreview = document.getElementById("canvas-preview");
-        const canvasCodeView = document.getElementById("canvas-code-view");
-
-        canvasSection.style.display = "block";
-        canvasLoading.style.display = "flex";
-        canvasToolbar.style.display = "none";
-        canvasPreview.style.display = "none";
-        canvasCodeView.style.display = "none";
-        canvasSection.scrollIntoView({ behavior: "smooth" });
-
-        try {
-          const siteData = await callModel("anthropic/claude-sonnet-4.5", [{ role: "user", content: sitePrompt }], apiKey);
-
-          if (siteData.error) {
-            canvasLoading.innerHTML = `<div class="error-text" style="padding:20px;">[Ошибка] ${siteData.error}</div>`;
-          } else {
-            let html = siteData.content;
-            html = html.replace(/^```html?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
-
-            canvasRawHtml = html;
-
-            canvasLoading.style.display = "none";
-            canvasToolbar.style.display = "flex";
-            document.getElementById("editor-toolbar").style.display = "flex";
-            canvasPreview.style.display = "block";
-
-            editorActive = false;
-            historyStack = [];
-            historyIndex = -1;
-
-            const iframe = document.getElementById("canvas-iframe");
-            iframe.srcdoc = html;
-
-            const codeContent = document.getElementById("canvas-code-content");
-            codeContent.textContent = html;
-          }
-        } catch (err) {
-          canvasLoading.innerHTML = `<div class="error-text" style="padding:20px;">[Ошибка] ${err.message}</div>`;
-        }
-
-        updateTimelineStep('step_6', 'done');
-        updateProjectStatus('generated', canvasRawHtml);
-        updateProjectMeta({ currentStep: 'step_6', compilerRawXml, grokCriteriaRaw, grokAudienceRaw });
-      }
-
-      // === STEP 7+8: Perplexity ratings search + download ===
-      if (startIdx <= 6) {
-        updateTimelineStep('step_7', 'running');
-
-        const ratingsSection = document.getElementById("ratings-section");
-        const ratingsLoading = document.getElementById("ratings-loading");
-        ratingsSection.style.display = "block";
-        ratingsLoading.style.display = "flex";
-        document.getElementById('ratings-progress').textContent = '';
-        ratingsSection.scrollIntoView({ behavior: "smooth" });
-
-        const perplexityPrompt = `${geoRequestStr ? 'КОНТЕКСТ ЛОКАЦИИ: ' + geoRequestStr + '\n' : ''}ЯЗЫК ОТВЕТА: ${queryLangStr}
-
-Найди 10-15 лучших рейтингов и обзоров компаний по теме "${niche}"${geoStr} в интернете.
-
-Для каждого рейтинга укажи:
-- Название статьи/сайта
-- Прямой URL страницы рейтинга
-
-Ищи именно страницы-рейтинги, обзоры, сравнения, ТОП-листы — где уже собрана структурированная информация о компаниях данной ниши.
-
-ВАЖНО: Верни ТОЛЬКО JSON-массив и НИЧЕГО больше. Без markdown, без пояснений, без бэктиков.
-Формат:
-[{"name": "Название рейтинга", "url": "https://..."}]`;
-
-        try {
-          const perplexityData = await callModel("perplexity/sonar-pro", [{ role: "user", content: perplexityPrompt }], apiKey);
-          ratingsLoading.style.display = "none";
-
-          if (perplexityData.error) {
-            document.getElementById('ratings-progress').textContent = `Ошибка Perplexity: ${perplexityData.error}`;
-          } else {
-            let jsonStr = perplexityData.content.replace(/^```json?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
-            const jsonMatch = jsonStr.match(/\[[\s\S]*\]/);
-            if (jsonMatch) jsonStr = jsonMatch[0];
-
-            try {
-              const ratings = JSON.parse(jsonStr);
-              const seenUrls = new Set();
-              extractedRatings = ratings.filter(r => {
-                if (!r.url) return false;
-                try {
-                  const domain = new URL(r.url).hostname;
-                  if (seenUrls.has(domain)) return false;
-                  seenUrls.add(domain);
-                  return true;
-                } catch { return false; }
-              }).map(r => ({ name: r.name, url: r.url, status: 'pending' }));
-
-              renderRatingsGrid();
-              updateTimelineStep('step_7', 'done');
-              updateTimelineStep('step_8_web', 'running');
-
-              const rQueue = [...extractedRatings.keys()];
-              async function processRatingQueue() {
-                while (rQueue.length > 0) {
-                  const idx = rQueue.shift();
-                  await downloadRatingSite(extractedRatings[idx], idx);
-                }
-              }
-              const rWorkers = Array.from(
-                { length: Math.min(5, extractedRatings.length) },
-                () => processRatingQueue()
-              );
-              await Promise.all(rWorkers);
-
-            } catch (parseErr) {
-              document.getElementById('ratings-progress').textContent = `Ошибка парсинга JSON: ${parseErr.message}. Ответ: ${perplexityData.content.substring(0, 200)}`;
-            }
-          }
-        } catch (err) {
-          ratingsLoading.style.display = "none";
-          document.getElementById('ratings-progress').textContent = `Ошибка: ${err.message}`;
-        }
-
-        updateTimelineStep('step_8_web', 'done');
-        updateProjectMeta({
-          currentStep: 'step_8_web',
-          compilerRawXml,
-          grokCriteriaRaw,
-          grokAudienceRaw,
-          extractedRatings,
-          downloadedRatings
-        });
-      }
-
-      // === STEP FILL: Auto-fill template with real data ===
-      if (startIdx <= 8) {
-        updateTimelineStep('step_fill', 'running');
-        const fillSection = document.getElementById('fill-section');
-        if (fillSection) fillSection.style.display = '';
-        const fillLoading = document.getElementById('fill-loading');
-        const fillMessages = document.getElementById('fill-messages');
-        if (fillLoading) fillLoading.style.display = 'flex';
-
-        try {
-          if (!canvasRawHtml) throw new Error('Нет HTML-шаблона (шаги 1-6 не выполнены)');
-
-          const userCompanyData = project.injection_info || '';
-
-          // Build ratings data blocks
-          const MAX_RATINGS_CHARS = 60000;
-          let ratingsChars = 0;
-          const ratingDataBlocks = extractedRatings
-            .filter(r => r.status === 'done' && downloadedRatings[r.name])
-            .map(r => {
-              const text = downloadedRatings[r.name].text.substring(0, 8000);
-              ratingsChars += text.length;
-              if (ratingsChars > MAX_RATINGS_CHARS) return null;
-              return `=== ${r.name} (${r.url}) ===\n${text}`;
-            })
-            .filter(Boolean)
-            .join('\n\n---\n\n');
-
-          const fillSiteLang = project?.site_lang || 'Русский';
-          const fillSiteLangStr = `Весь контент сайта на языке: ${fillSiteLang}`;
-
-          // Protect SEO/counters blocks
-          let savedSeoBlock = '';
-          let savedCountersBlock = '';
-          let cleanedCanvasHtml = canvasRawHtml;
-
-          const seoMatch = cleanedCanvasHtml.match(/<!-- PROTECTED:SEO:START -->([\s\S]*?)<!-- PROTECTED:SEO:END -->/);
-          if (seoMatch) {
-            savedSeoBlock = seoMatch[1];
-            cleanedCanvasHtml = cleanedCanvasHtml.replace(seoMatch[0], '<!-- PROTECTED:SEO:START --><!-- PROTECTED:SEO:END -->');
-          }
-          const countersMatch = cleanedCanvasHtml.match(/<!-- PROTECTED:COUNTERS:START -->([\s\S]*?)<!-- PROTECTED:COUNTERS:END -->/);
-          if (countersMatch) {
-            savedCountersBlock = countersMatch[1];
-            cleanedCanvasHtml = cleanedCanvasHtml.replace(countersMatch[0], '<!-- PROTECTED:COUNTERS:START --><!-- PROTECTED:COUNTERS:END -->');
-          }
-
-          const fillPrompt = `ЯЗЫК САЙТА: ${fillSiteLangStr}
-
-РОЛЬ: Ты — Senior SEO-копирайтер и веб-разработчик. Твоя задача — наполнить готовый HTML-шаблон рейтинга реальными данными компаний.
-
-ВХОДНЫЕ ДАННЫЕ:
-
-1. HTML-ШАБЛОН САЙТА:
-<template>
-${cleanedCanvasHtml}
-</template>
-
-2. ДАННЫЕ С РЕЙТИНГОВЫХ САЙТОВ (структурированные обзоры — ОСНОВНОЙ источник фактов):
-<ratings_data>
-${ratingDataBlocks || '(Рейтинговые сайты не были скачаны)'}
-</ratings_data>
-
-3. ДАННЫЕ КОМПАНИИ ПОЛЬЗОВАТЕЛЯ (ДОЛЖНА СТАТЬ #1 В РЕЙТИНГЕ):
-<user_company>
-${userCompanyData || '(Пользователь не предоставил данные своей компании)'}
-</user_company>
-
-4. XML-СТРУКТУРА КРИТЕРИЕВ:
-<criteria>
-${compilerRawXml}
-</criteria>
-
-ЗАДАЧА:
-1. Используй данные рейтинговых сайтов (ratings_data) как ОСНОВНОЙ источник фактов: названия компаний, описания, цены, баллы, преимущества, недостатки.
-2. Наполни HTML-шаблон реальными данными:
-   - Замени placeholder-названия на реальные.
-   - Замени placeholder-описания на реальные данные.
-   - Заполни метрики на основе анализа данных.
-   - Обнови баллы и рейтинги.
-3. КРИТИЧЕСКИ ВАЖНО: Компания пользователя (из user_company) ДОЛЖНА быть на 1 месте с бейджем "Выбор редакции" и наивысшими баллами.
-4. Сохрани всю структуру, стили, Schema.org разметку и JavaScript из шаблона.
-5. ${fillSiteLangStr}.
-
-СОХРАНЕНИЕ РАЗМЕТКИ БЛОКОВ:
-Все атрибуты data-block-id, data-block-type, data-company-rank на элементах <section> и <tr> должны быть сохранены в неизменном виде. Не удалять, не менять нумерацию. Если добавляешь новые блоки — продолжай нумерацию data-block-id с максимального существующего +1.
-
-ЗАЩИТНЫЕ МАРКЕРЫ:
-Блоки между <!-- PROTECTED:SEO:START/END --> и <!-- PROTECTED:COUNTERS:START/END --> в <head> НЕ ТРОГАЙ. Не удаляй маркеры, не меняй содержимое между ними, не перемещай их.
-
-SCHEMA.ORG: Не дублируй JSON-LD сущности. Question — только внутри FAQPage.mainEntity, не создавай отдельные JSON-LD блоки для Question. Person — один блок с @id, остальные ссылаются через @id.
-
-ФОРМАТ: Выведи ТОЛЬКО полный HTML-код. Без пояснений, без markdown, без тройных бэктиков. Чистый HTML начиная с <!DOCTYPE html>.`;
-
-          const fillData = await callModel('anthropic/claude-sonnet-4.5', [{ role: 'user', content: fillPrompt }], apiKey);
-
-          if (fillData.error) throw new Error(fillData.error);
-
-          let filledHtml = fillData.content;
-          filledHtml = filledHtml.replace(/^```html?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
-
-          // Restore protected blocks
-          if (savedSeoBlock) {
-            if (filledHtml.includes('<!-- PROTECTED:SEO:START -->')) {
-              filledHtml = filledHtml.replace(
-                /<!-- PROTECTED:SEO:START -->[\s\S]*?<!-- PROTECTED:SEO:END -->/,
-                `<!-- PROTECTED:SEO:START -->${savedSeoBlock}<!-- PROTECTED:SEO:END -->`
-              );
-            } else {
-              filledHtml = filledHtml.replace('</head>', `<!-- PROTECTED:SEO:START -->${savedSeoBlock}<!-- PROTECTED:SEO:END -->\n</head>`);
-            }
-          }
-          if (savedCountersBlock) {
-            if (filledHtml.includes('<!-- PROTECTED:COUNTERS:START -->')) {
-              filledHtml = filledHtml.replace(
-                /<!-- PROTECTED:COUNTERS:START -->[\s\S]*?<!-- PROTECTED:COUNTERS:END -->/,
-                `<!-- PROTECTED:COUNTERS:START -->${savedCountersBlock}<!-- PROTECTED:COUNTERS:END -->`
-              );
-            } else {
-              filledHtml = filledHtml.replace('</head>', `<!-- PROTECTED:COUNTERS:START -->${savedCountersBlock}<!-- PROTECTED:COUNTERS:END -->\n</head>`);
-            }
-          }
-
-          canvasRawHtml = filledHtml;
-
-          const iframe = document.getElementById('canvas-iframe');
-          if (iframe) iframe.srcdoc = filledHtml;
-          const codeContent = document.getElementById('canvas-code-content');
-          if (codeContent) codeContent.textContent = filledHtml;
-
-          // Show editor toolbar + reset editor state
-          const editorToolbar = document.getElementById('editor-toolbar');
-          if (editorToolbar) editorToolbar.style.display = 'flex';
-          editorActive = false;
-          historyStack = [];
-          historyIndex = -1;
-
-          if (fillLoading) fillLoading.style.display = 'none';
-          if (fillMessages) {
-            fillMessages.innerHTML = `
-              <div class="chat-msg chat-msg-assistant" style="padding:12px">
-                <div style="font-size:12px; color:#7ee787;">Сайт наполнен реальными данными компаний</div>
-              </div>`;
-          }
-
-          document.getElementById('canvas-section').scrollIntoView({ behavior: 'smooth' });
-          updateProjectStatus('filled', canvasRawHtml);
-          updateTimelineStep('step_fill', 'done');
-          updateProjectMeta({ currentStep: 'step_fill' });
-
-        } catch (fillErr) {
-          console.error('Fill template error:', fillErr);
-          if (fillLoading) fillLoading.style.display = 'none';
-          if (fillMessages) {
-            fillMessages.innerHTML = `
-              <div class="chat-msg chat-msg-assistant" style="padding:12px">
-                <div style="font-size:12px; color:#f0883e;">[Ошибка наполнения] ${fillErr.message}</div>
-              </div>`;
-          }
-          updateTimelineStep('step_fill', 'error');
-        }
-      }
-
-      } catch (pipelineErr) {
-        console.error('Pipeline error:', pipelineErr);
-        showNotification(`Ошибка пайплайна: ${pipelineErr.message}`, true);
-      }
-
-      pipelineRunning = false;
-      showNotification('Пайплайн завершён');
+    async function refreshProject(projectId) {
+      if (projectId) await renderProject(projectId);
     }
 
     // Restore saved API key
