@@ -904,6 +904,7 @@
           <button class="editor-btn" id="redo-btn" onclick="editorRedo()" disabled style="display:none;">↪ Повторить</button>
           <div style="flex:1;"></div>
           <button class="editor-btn" id="seo-panel-toggle" onclick="toggleSeoPanel()">SEO и счётчики</button>
+          <button class="editor-btn editor-btn-primary" onclick="openInEditor()">Открыть в редакторе</button>
           <button class="editor-btn editor-btn-primary" id="download-html-btn" onclick="downloadHtml()">Скачать HTML</button>
         </div>
         <div id="canvas-loading" class="loading" style="display:none;"><div class="spinner"></div>Claude генерирует сайт...</div>
@@ -2051,24 +2052,57 @@ SCHEMA.ORG: Не дублируй JSON-LD сущности. Question — тол�
     // =============================================
     // 3B.6 — Autosave canvasRawHtml from iframe
     // =============================================
-    function syncCanvasRawHtml() {
-      const iframe = document.getElementById('canvas-iframe');
-      if (iframe.contentDocument && iframe.contentDocument.documentElement) {
-        canvasRawHtml = '<!DOCTYPE html>' + iframe.contentDocument.documentElement.outerHTML;
-        // Also update code view
-        const codeContent = document.getElementById("canvas-code-content");
-        if (codeContent) codeContent.textContent = canvasRawHtml;
-        saveState(); // Autosave after any editor action
-        updateProjectHtml(canvasRawHtml);
+    function getActiveEditorDoc() {
+      // If editor window is open, prefer it
+      if (editorWindow && !editorWindow.closed && editorWindow.document?.body) {
+        return editorWindow.document;
       }
+      const iframe = document.getElementById('canvas-iframe');
+      return iframe?.contentDocument || null;
+    }
+
+    function syncCanvasRawHtml() {
+      if (editorWindow && !editorWindow.closed) {
+        // Sync from editor window — get clean HTML without editor artifacts
+        const doc = editorWindow.document;
+        if (doc?.documentElement) {
+          let html = '<!DOCTYPE html>' + doc.documentElement.outerHTML;
+          // Clean editor artifacts
+          html = html.replace(/<div id="__ew_toolbar__">[\s\S]*?<\/div>\s*/, '');
+          html = html.replace(/<style id="__editor_style__">[\s\S]*?<\/style>/g, '');
+          html = html.replace(/<style id="__editor_spin_style__">[\s\S]*?<\/style>/g, '');
+          html = html.replace(/<style id="__ew_anim_style__">[\s\S]*?<\/style>/g, '');
+          html = html.replace(/<div class="__editor_toolbar__">[\s\S]*?<\/div>/g, '');
+          html = html.replace(/<div class="__editor_comment_popup__">[\s\S]*?<\/div>/g, '');
+          html = html.replace(/<div class="__editor_loader__">[\s\S]*?<\/div>/g, '');
+          html = html.replace(/<div id="__ew_seo_panel__">[\s\S]*?<\/div>\s*<\/div>/g, '');
+          html = html.replace(/<div id="__ew_notification__">[\s\S]*?<\/div>/g, '');
+          html = html.replace(/ ?class="__editor_hover__"/g, '');
+          html = html.replace(/ ?class="__editor_collapsed__"/g, '');
+          html = html.replace(/ style="position: relative;"/g, '');
+          html = html.replace(/ style="padding-top: 50px;"/g, '');
+          canvasRawHtml = html;
+          editorWindowDirty = true;
+        }
+      } else {
+        const iframe = document.getElementById('canvas-iframe');
+        if (iframe?.contentDocument?.documentElement) {
+          canvasRawHtml = '<!DOCTYPE html>' + iframe.contentDocument.documentElement.outerHTML;
+        }
+      }
+      // Also update code view
+      const codeContent = document.getElementById("canvas-code-content");
+      if (codeContent) codeContent.textContent = canvasRawHtml;
+      saveState(); // Autosave after any editor action
+      updateProjectHtml(canvasRawHtml);
     }
 
     // =============================================
     // 3B.5 — Undo / Redo
     // =============================================
     function pushSnapshot() {
-      const iframe = document.getElementById('canvas-iframe');
-      const body = iframe.contentDocument?.body;
+      const doc = getActiveEditorDoc();
+      const body = doc?.body;
       if (!body) return;
 
       // If we're in the middle of history, discard the forward part
@@ -2098,15 +2132,19 @@ SCHEMA.ORG: Не дублируй JSON-LD сущности. Question — тол�
     }
 
     function restoreSnapshot() {
-      const iframe = document.getElementById('canvas-iframe');
-      const body = iframe.contentDocument?.body;
+      const doc = getActiveEditorDoc();
+      const body = doc?.body;
       if (!body || historyIndex < 0 || historyIndex >= historyStack.length) return;
 
       body.innerHTML = historyStack[historyIndex];
+      // Restore padding-top if in editor window
+      if (editorWindow && !editorWindow.closed && doc === editorWindow.document) {
+        body.style.paddingTop = '50px';
+      }
       syncCanvasRawHtml();
       updateUndoRedoButtons();
       // Re-inject editor event listeners after restoring
-      if (editorActive) injectEditorListeners(iframe.contentDocument);
+      if (editorActive) injectEditorListeners(doc);
     }
 
     function updateUndoRedoButtons() {
@@ -2125,8 +2163,7 @@ SCHEMA.ORG: Не дублируй JSON-LD сущности. Question — тол�
       undoBtn.style.display = on ? '' : 'none';
       redoBtn.style.display = on ? '' : 'none';
 
-      const iframe = document.getElementById('canvas-iframe');
-      const iDoc = iframe.contentDocument;
+      const iDoc = getActiveEditorDoc();
       if (!iDoc) return;
 
       if (on) {
@@ -2538,7 +2575,7 @@ ${userComment}
     }
 
     // =============================================
-    // Keyboard shortcuts for undo/redo
+    // Keyboard shortcuts for undo/redo (main window iframe)
     // =============================================
     document.addEventListener('keydown', (e) => {
       if (!editorActive) return;
@@ -2551,6 +2588,384 @@ ${userComment}
         editorRedo();
       }
     });
+
+    // =============================================
+    // Правка #8 — Editor in separate window (window.open)
+    // =============================================
+    let editorWindow = null;
+    let editorWindowDirty = false;
+
+    function openInEditor() {
+      if (!canvasRawHtml) return showNotification('Сначала сгенерируйте сайт', true);
+
+      editorWindow = window.open('', '_blank');
+      if (!editorWindow) return showNotification('Браузер заблокировал popup — разрешите всплывающие окна', true);
+
+      editorWindow.document.open();
+      editorWindow.document.write(canvasRawHtml);
+      editorWindow.document.close();
+
+      // Wait for document to load, then inject editor
+      editorWindow.addEventListener('load', () => {
+        injectEditor(editorWindow);
+      });
+      // Fallback if load already fired
+      setTimeout(() => {
+        if (editorWindow && editorWindow.document.body && !editorWindow.document.getElementById('__ew_toolbar__')) {
+          injectEditor(editorWindow);
+        }
+      }, 500);
+    }
+
+    function injectEditor(win) {
+      const doc = win.document;
+
+      // Pass config to editor window
+      win.__EDITOR_CONFIG__ = {
+        apiKey: document.getElementById('apiKey').value.trim(),
+        model: 'anthropic/claude-sonnet-4.5',
+        siteLang: document.getElementById('siteLang')?.value || 'Русский',
+        projectId: currentProjectId,
+        supabaseUrl: SUPABASE_URL,
+        supabaseKey: SUPABASE_ANON_KEY
+      };
+
+      // Add padding-top for toolbar
+      doc.body.style.paddingTop = '50px';
+
+      // Inject toolbar
+      const toolbar = doc.createElement('div');
+      toolbar.id = '__ew_toolbar__';
+      toolbar.innerHTML = `
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+          <input type="checkbox" id="__ew_edit_toggle__"> Редактирование
+        </label>
+        <button id="__ew_undo__" disabled style="opacity:0.4;">↩ Отменить</button>
+        <button id="__ew_redo__" disabled style="opacity:0.4;">↪ Повторить</button>
+        <span style="flex:1;"></span>
+        <button id="__ew_seo__">SEO</button>
+        <button id="__ew_save__" style="background:#238636;border-color:#238636;color:#fff;">Сохранить</button>
+        <button id="__ew_download__" style="background:#1f6feb;border-color:#1f6feb;color:#fff;">Скачать HTML</button>
+      `;
+      Object.assign(toolbar.style, {
+        position: 'fixed', top: '0', left: '0', right: '0', zIndex: '99999',
+        height: '44px', display: 'flex', alignItems: 'center', gap: '8px',
+        padding: '0 16px', background: '#1c2128', borderBottom: '1px solid #30363d',
+        fontFamily: '-apple-system,BlinkMacSystemFont,sans-serif', fontSize: '13px', color: '#e1e4e8'
+      });
+      // Style buttons
+      const btnStyle = 'background:#21262d;border:1px solid #30363d;border-radius:6px;padding:5px 10px;color:#c9d1d9;cursor:pointer;font-size:12px;';
+      toolbar.querySelectorAll('button').forEach(b => b.style.cssText += btnStyle);
+
+      doc.body.insertBefore(toolbar, doc.body.firstChild);
+
+      // Editor state for this window
+      let ewEditorActive = false;
+      let ewHistoryStack = [];
+      let ewHistoryIndex = -1;
+
+      function ewPushSnapshot() {
+        const snap = doc.body.innerHTML;
+        ewHistoryStack = ewHistoryStack.slice(0, ewHistoryIndex + 1);
+        ewHistoryStack.push(snap);
+        if (ewHistoryStack.length > 20) ewHistoryStack.shift();
+        ewHistoryIndex = ewHistoryStack.length - 1;
+        ewUpdateUndoRedo();
+        editorWindowDirty = true;
+      }
+
+      function ewUndo() {
+        if (ewHistoryIndex <= 0) return;
+        ewHistoryIndex--;
+        doc.body.innerHTML = ewHistoryStack[ewHistoryIndex];
+        doc.body.style.paddingTop = '50px';
+        if (ewEditorActive) ewInjectListeners();
+        ewUpdateUndoRedo();
+        ewSyncBack();
+      }
+
+      function ewRedo() {
+        if (ewHistoryIndex >= ewHistoryStack.length - 1) return;
+        ewHistoryIndex++;
+        doc.body.innerHTML = ewHistoryStack[ewHistoryIndex];
+        doc.body.style.paddingTop = '50px';
+        if (ewEditorActive) ewInjectListeners();
+        ewUpdateUndoRedo();
+        ewSyncBack();
+      }
+
+      function ewUpdateUndoRedo() {
+        const undo = doc.getElementById('__ew_undo__');
+        const redo = doc.getElementById('__ew_redo__');
+        if (undo) { undo.disabled = ewHistoryIndex <= 0; undo.style.opacity = ewHistoryIndex <= 0 ? '0.4' : '1'; }
+        if (redo) { redo.disabled = ewHistoryIndex >= ewHistoryStack.length - 1; redo.style.opacity = ewHistoryIndex >= ewHistoryStack.length - 1 ? '0.4' : '1'; }
+      }
+
+      function ewSyncBack() {
+        // Sync HTML back to main window
+        const clean = ewGetCleanHtml();
+        canvasRawHtml = clean;
+        if (window.opener && !window.opener.closed) {
+          window.opener.canvasRawHtml = clean;
+        }
+        editorWindowDirty = true;
+      }
+
+      function ewGetCleanHtml() {
+        let html = '<!DOCTYPE html>' + doc.documentElement.outerHTML;
+        // Remove editor toolbar
+        html = html.replace(/<div id="__ew_toolbar__">[\s\S]*?<\/div>\s*/, '');
+        // Remove editor styles and artifacts
+        html = html.replace(/<style id="__editor_style__">[\s\S]*?<\/style>/g, '');
+        html = html.replace(/<style id="__editor_spin_style__">[\s\S]*?<\/style>/g, '');
+        html = html.replace(/<div class="__editor_toolbar__">[\s\S]*?<\/div>/g, '');
+        html = html.replace(/<div class="__editor_comment_popup__">[\s\S]*?<\/div>/g, '');
+        html = html.replace(/<div class="__editor_loader__">[\s\S]*?<\/div>/g, '');
+        html = html.replace(/ ?class="__editor_hover__"/g, '');
+        html = html.replace(/ ?class="__editor_collapsed__"/g, '');
+        html = html.replace(/ style="position: relative;"/g, '');
+        html = html.replace(/ style="padding-top: 50px;"/g, '');
+        // Remove SEO panel if injected
+        html = html.replace(/<div id="__ew_seo_panel__">[\s\S]*?<\/div>\s*<\/div>/g, '');
+        return html;
+      }
+
+      // Toggle edit mode
+      doc.getElementById('__ew_edit_toggle__').onchange = function() {
+        ewEditorActive = this.checked;
+        if (ewEditorActive) {
+          if (ewHistoryStack.length === 0) ewPushSnapshot();
+          ewInjectListeners();
+        } else {
+          removeEditorOverlays(doc);
+        }
+      };
+
+      // Undo / Redo
+      doc.getElementById('__ew_undo__').onclick = ewUndo;
+      doc.getElementById('__ew_redo__').onclick = ewRedo;
+
+      // Keyboard shortcuts
+      doc.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+          e.preventDefault();
+          ewUndo();
+        }
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z' && e.shiftKey) {
+          e.preventDefault();
+          ewRedo();
+        }
+        // Ctrl+S = save
+        if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+          e.preventDefault();
+          ewSave();
+        }
+      });
+
+      // Save to Supabase
+      async function ewSave() {
+        const clean = ewGetCleanHtml();
+        canvasRawHtml = clean;
+        if (window.opener && !window.opener.closed) {
+          window.opener.canvasRawHtml = clean;
+        }
+
+        const cfg = win.__EDITOR_CONFIG__;
+        if (cfg.projectId && cfg.supabaseUrl && cfg.supabaseKey) {
+          const sb = window.supabase?.createClient?.(cfg.supabaseUrl, cfg.supabaseKey)
+                     || (window.opener?.supabase ? window.opener.supabase : null);
+          if (sb) {
+            // Use parent window's supabase client via opener
+          }
+          // Update via parent window function
+          if (window.opener && !window.opener.closed && window.opener.updateProjectHtml) {
+            window.opener.updateProjectHtml(clean);
+            window.opener.updateProjectStatus('edited', clean);
+          }
+        }
+
+        editorWindowDirty = false;
+        ewShowNotification('Сохранено');
+      }
+
+      doc.getElementById('__ew_save__').onclick = ewSave;
+
+      // Download HTML
+      doc.getElementById('__ew_download__').onclick = function() {
+        const clean = ewGetCleanHtml();
+        const niche = window.opener?.document?.getElementById('niche')?.value?.trim() || 'site';
+        const dateStr = new Date().toISOString().slice(0, 10);
+        const filename = `rating-${niche.replace(/[^a-zA-Zа-яА-Я0-9]/g, '_')}-${dateStr}.html`;
+
+        const blob = new Blob([clean], { type: 'text/html; charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = doc.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+
+      // SEO panel toggle
+      doc.getElementById('__ew_seo__').onclick = function() {
+        let panel = doc.getElementById('__ew_seo_panel__');
+        if (panel) {
+          panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+          return;
+        }
+        ewCreateSeoPanel();
+      };
+
+      function ewCreateSeoPanel() {
+        const panel = doc.createElement('div');
+        panel.id = '__ew_seo_panel__';
+        Object.assign(panel.style, {
+          position: 'fixed', top: '44px', right: '0', width: '360px', maxHeight: 'calc(100vh - 44px)',
+          overflowY: 'auto', background: '#161b22', border: '1px solid #30363d', borderTop: 'none',
+          zIndex: '99998', padding: '16px', fontFamily: '-apple-system,sans-serif', fontSize: '13px', color: '#e1e4e8'
+        });
+        const fields = [
+          { id: 'counterYandex', label: 'Яндекс.Метрика', type: 'textarea' },
+          { id: 'counterGoogle', label: 'Google Analytics / GTM', type: 'textarea' },
+          { id: 'metaYandex', label: 'Яндекс.Вебмастер', type: 'input' },
+          { id: 'metaGoogle', label: 'Google Search Console', type: 'input' },
+          { id: 'metaTitle', label: 'Title', type: 'input' },
+          { id: 'metaDesc', label: 'Description', type: 'textarea' },
+          { id: 'metaKeywords', label: 'Keywords', type: 'input' },
+          { id: 'metaOgImage', label: 'OG Image URL', type: 'input' }
+        ];
+
+        // Try to read current values from head
+        const currentValues = ewReadSeoFromHead();
+
+        panel.innerHTML = '<h3 style="margin:0 0 12px;font-size:14px;color:#fff;">SEO и счётчики</h3>' +
+          fields.map(f => `
+            <div style="margin-bottom:10px;">
+              <label style="display:block;font-size:12px;color:#8b949e;margin-bottom:4px;">${f.label}</label>
+              ${f.type === 'textarea'
+                ? `<textarea id="__ew_${f.id}__" style="width:100%;min-height:60px;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:8px;color:#e1e4e8;font-size:12px;resize:vertical;">${currentValues[f.id] || ''}</textarea>`
+                : `<input id="__ew_${f.id}__" value="${currentValues[f.id] || ''}" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:8px;color:#e1e4e8;font-size:12px;">`}
+            </div>
+          `).join('') +
+          '<button id="__ew_apply_seo__" style="width:100%;padding:8px;background:#238636;border:1px solid #238636;border-radius:6px;color:#fff;cursor:pointer;font-size:13px;">Применить</button>';
+
+        doc.body.appendChild(panel);
+
+        doc.getElementById('__ew_apply_seo__').onclick = function() {
+          ewApplySeo();
+        };
+      }
+
+      function ewReadSeoFromHead() {
+        const vals = {};
+        // Read meta title
+        const title = doc.querySelector('title');
+        if (title) vals.metaTitle = title.textContent;
+        // Read meta description
+        const desc = doc.querySelector('meta[name="description"]');
+        if (desc) vals.metaDesc = desc.getAttribute('content') || '';
+        // Read meta keywords
+        const kw = doc.querySelector('meta[name="keywords"]');
+        if (kw) vals.metaKeywords = kw.getAttribute('content') || '';
+        // Read og:image
+        const og = doc.querySelector('meta[property="og:image"]');
+        if (og) vals.metaOgImage = og.getAttribute('content') || '';
+        return vals;
+      }
+
+      function ewApplySeo() {
+        ewPushSnapshot();
+        const head = doc.head;
+
+        // Apply counters inside PROTECTED:COUNTERS block
+        const counterYandex = doc.getElementById('__ew_counterYandex__')?.value || '';
+        const counterGoogle = doc.getElementById('__ew_counterGoogle__')?.value || '';
+        let countersContent = '';
+        if (counterYandex) countersContent += counterYandex + '\n';
+        if (counterGoogle) countersContent += counterGoogle + '\n';
+
+        const headHtml = head.innerHTML;
+        if (headHtml.includes('<!-- PROTECTED:COUNTERS:START -->')) {
+          head.innerHTML = headHtml.replace(
+            /<!-- PROTECTED:COUNTERS:START -->[\s\S]*?<!-- PROTECTED:COUNTERS:END -->/,
+            `<!-- PROTECTED:COUNTERS:START -->\n${countersContent}<!-- PROTECTED:COUNTERS:END -->`
+          );
+        }
+
+        // Apply SEO meta inside PROTECTED:SEO block
+        const metaYandex = doc.getElementById('__ew_metaYandex__')?.value || '';
+        const metaGoogle = doc.getElementById('__ew_metaGoogle__')?.value || '';
+        const metaTitle = doc.getElementById('__ew_metaTitle__')?.value || '';
+        const metaDesc = doc.getElementById('__ew_metaDesc__')?.value || '';
+        const metaKeywords = doc.getElementById('__ew_metaKeywords__')?.value || '';
+        const metaOgImage = doc.getElementById('__ew_metaOgImage__')?.value || '';
+
+        let seoContent = '';
+        if (metaYandex) seoContent += `<meta name="yandex-verification" content="${metaYandex}">\n`;
+        if (metaGoogle) seoContent += `<meta name="google-site-verification" content="${metaGoogle}">\n`;
+        if (metaTitle) {
+          const titleEl = doc.querySelector('title');
+          if (titleEl) titleEl.textContent = metaTitle;
+        }
+        if (metaDesc) seoContent += `<meta name="description" content="${metaDesc}">\n`;
+        if (metaKeywords) seoContent += `<meta name="keywords" content="${metaKeywords}">\n`;
+        if (metaOgImage) seoContent += `<meta property="og:image" content="${metaOgImage}">\n`;
+
+        const headHtml2 = head.innerHTML;
+        if (headHtml2.includes('<!-- PROTECTED:SEO:START -->')) {
+          head.innerHTML = headHtml2.replace(
+            /<!-- PROTECTED:SEO:START -->[\s\S]*?<!-- PROTECTED:SEO:END -->/,
+            `<!-- PROTECTED:SEO:START -->\n${seoContent}<!-- PROTECTED:SEO:END -->`
+          );
+        }
+
+        ewSyncBack();
+        ewShowNotification('SEO применено');
+      }
+
+      function ewShowNotification(msg) {
+        let note = doc.getElementById('__ew_notification__');
+        if (note) note.remove();
+        note = doc.createElement('div');
+        note.id = '__ew_notification__';
+        Object.assign(note.style, {
+          position: 'fixed', bottom: '20px', right: '20px', zIndex: '100000',
+          background: '#238636', color: '#fff', padding: '10px 20px', borderRadius: '8px',
+          fontSize: '13px', animation: 'fadeInOut 2.5s ease forwards'
+        });
+        // Add animation keyframes if needed
+        if (!doc.getElementById('__ew_anim_style__')) {
+          const animStyle = doc.createElement('style');
+          animStyle.id = '__ew_anim_style__';
+          animStyle.textContent = '@keyframes fadeInOut { 0%{opacity:0;transform:translateY(10px)} 15%{opacity:1;transform:translateY(0)} 80%{opacity:1} 100%{opacity:0} }';
+          doc.head.appendChild(animStyle);
+        }
+        note.textContent = msg;
+        doc.body.appendChild(note);
+        setTimeout(() => note.remove(), 2500);
+      }
+
+      // Hover overlay + toolbar injection (same as 3B.2 but for editor window)
+      function ewInjectListeners() {
+        removeEditorOverlays(doc);
+        injectEditorListeners(doc);
+
+        // Override the callModel for regeneration to use editor window's apiKey
+        // The existing injectEditorListeners/createBlockToolbar use the main window's functions
+        // which reference iframe.contentDocument — but we're now using doc directly.
+        // The functions (injectEditorListeners, createBlockToolbar, etc.) already accept iDoc parameter
+        // so they work with any document. The regenerateBlock function uses document.getElementById("apiKey")
+        // which will correctly reference the main window.
+      }
+
+      // Before unload warning
+      win.addEventListener('beforeunload', (e) => {
+        if (editorWindowDirty) {
+          e.preventDefault();
+          e.returnValue = 'Есть несохранённые изменения. Закрыть?';
+        }
+      });
+    }
 
     function updatePreview() {
       const niche = document.getElementById("niche").value.trim();
