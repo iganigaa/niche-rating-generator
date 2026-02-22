@@ -2214,7 +2214,8 @@
           block.remove();
         }
         syncCanvasRawHtml();
-        if (editorActive) injectEditorListeners(iDoc);
+        const isEditorWin = editorWindow && !editorWindow.closed && iDoc === editorWindow.document;
+        if (editorActive || isEditorWin) injectEditorListeners(iDoc);
       };
       toolbar.appendChild(delBtn);
 
@@ -2311,16 +2312,44 @@
       };
       popup.appendChild(sendBtn);
 
-      if (getComputedStyle(block).position === 'static') {
+      const compStyle = (iDoc.defaultView || window).getComputedStyle(block);
+      if (compStyle.position === 'static') {
         block.style.position = 'relative';
       }
       block.appendChild(popup);
       textarea.focus();
     }
 
+    // Show notification in the correct document context (editor window or main window)
+    function showEditorNotification(iDoc, msg, isError) {
+      const targetDoc = iDoc || document;
+      const note = targetDoc.createElement('div');
+      Object.assign(note.style, {
+        position: 'fixed', bottom: '20px', right: '20px', zIndex: '100000',
+        background: isError ? '#da3633' : '#238636', color: '#fff',
+        padding: '10px 20px', borderRadius: '8px', fontSize: '13px',
+        fontFamily: '-apple-system,BlinkMacSystemFont,sans-serif',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+        transition: 'opacity 0.3s'
+      });
+      note.textContent = msg;
+      targetDoc.body.appendChild(note);
+      setTimeout(() => { note.style.opacity = '0'; setTimeout(() => note.remove(), 300); }, 2500);
+      // Also show in main window for consistency
+      if (targetDoc !== document) showNotification(msg, isError);
+    }
+
     async function regenerateBlock(block, userComment, iDoc) {
-      const apiKey = localStorage.getItem("openrouter_key") || document.getElementById("apiKey")?.value?.trim() || '';
-      if (!apiKey) return showNotification('Нет API-ключа OpenRouter', true);
+      // Try multiple sources for API key
+      const editorConfig = iDoc.defaultView?.__EDITOR_CONFIG__;
+      const apiKey = localStorage.getItem("openrouter_key")
+        || editorConfig?.apiKey
+        || document.getElementById("apiKey")?.value?.trim()
+        || '';
+      if (!apiKey) {
+        showEditorNotification(iDoc, 'Нет API-ключа OpenRouter', true);
+        return;
+      }
 
       // Save snapshot for undo
       pushSnapshot();
@@ -2336,17 +2365,18 @@
         spinStyle.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
         iDoc.head.appendChild(spinStyle);
       }
-      if (getComputedStyle(block).position === 'static') {
+      const compStyle = (iDoc.defaultView || window).getComputedStyle(block);
+      if (compStyle.position === 'static') {
         block.style.position = 'relative';
       }
       block.appendChild(loader);
 
       // Collect context — minimal CSS for speed
       const blockHtml = block.outerHTML;
-      const siteLang = document.getElementById('siteLang')?.value || 'Русский';
+      const siteLang = editorConfig?.siteLang || document.getElementById('siteLang')?.value || 'Русский';
 
       // Extract only :root vars and classes used in the block
-      const allStyles = Array.from(iDoc.querySelectorAll('style')).map(s => s.textContent).join('\n');
+      const allStyles = Array.from(iDoc.querySelectorAll('style:not([id^="__editor"])')).map(s => s.textContent).join('\n');
       const rootMatch = allStyles.match(/:root\s*\{[^}]*\}/g);
       const rootVars = rootMatch ? rootMatch.join('\n') : '';
       // Find class names used in block HTML
@@ -2357,7 +2387,8 @@
       // Extract only matching CSS rules (up to 4000 chars)
       let relevantCSS = rootVars + '\n';
       if (classNames.size > 0) {
-        const classPattern = new RegExp('\\.' + [...classNames].map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|\\.'), 'g');
+        // No 'g' flag — test() with 'g' skips every other match due to lastIndex
+        const classPattern = new RegExp('\\.' + [...classNames].map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|\\.'));
         const rules = allStyles.match(/[^{}]*\{[^}]*\}/g) || [];
         for (const rule of rules) {
           if (classPattern.test(rule)) {
@@ -2394,11 +2425,12 @@ ${userComment}
 7. Формат ответа: только HTML, без пояснений, без markdown, без обёрток в тройные бэктики`;
 
       try {
+        showEditorNotification(iDoc, 'Регенерация блока...', false);
         const data = await callModel("anthropic/claude-haiku-4.5", [{ role: "user", content: regenPrompt }], apiKey);
 
         if (data.error) {
           loader.remove();
-          showNotification('Ошибка регенерации: ' + data.error, true);
+          showEditorNotification(iDoc, 'Ошибка регенерации: ' + data.error, true);
           editorUndo();
           return;
         }
@@ -2409,10 +2441,13 @@ ${userComment}
         block.outerHTML = newHtml;
         loader.remove();
         syncCanvasRawHtml();
-        if (editorActive) injectEditorListeners(iDoc);
+        // Re-inject editor listeners in both inline and window editor modes
+        const isEditorWin = editorWindow && !editorWindow.closed && iDoc === editorWindow.document;
+        if (editorActive || isEditorWin) injectEditorListeners(iDoc);
+        showEditorNotification(iDoc, 'Блок обновлён', false);
       } catch (err) {
         loader.remove();
-        showNotification('Ошибка регенерации: ' + err.message, true);
+        showEditorNotification(iDoc, 'Ошибка регенерации: ' + err.message, true);
         editorUndo();
       }
     }
