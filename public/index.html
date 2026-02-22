@@ -3869,14 +3869,37 @@ ${criteriaBlocks}
         if (designSection) designSection.style.display = '';
 
         try {
-          const ds = await generateDesignSystem(niche + ' ' + (geo || ''), niche);
+          // Translate niche to English if it contains Cyrillic (CSV data is in English)
+          let designQuery = niche + ' ' + (geo || '');
+          if (/[а-яёА-ЯЁ]/.test(designQuery)) {
+            try {
+              const translateResp = await callModel(
+                'google/gemini-2.0-flash-001',
+                [{ role: 'user', content: `Translate this business niche to English in 2-4 keywords. Only output keywords, nothing else: ${niche} ${geo || ''}` }],
+                apiKey
+              );
+              const translated = translateResp.trim();
+              if (translated && !/error|sorry|не могу/i.test(translated)) {
+                console.log(`[step_design] Translated niche: "${niche} ${geo || ''}" → "${translated}"`);
+                designQuery = translated;
+              }
+            } catch (translateErr) {
+              console.warn('[step_design] Niche translation failed, using original:', translateErr.message);
+            }
+          }
+
+          const ds = await generateDesignSystem(designQuery, niche);
           designSystemRaw = formatDesignSystemForPrompt(ds);
 
           const designMessages = document.getElementById('design-messages');
           if (designMessages) {
+            const translationNote = designQuery !== (niche + ' ' + (geo || ''))
+              ? `<div style="margin-bottom:12px; padding:8px 12px; background:#1a1f35; border-radius:6px; font-size:12px; color:#7ee787;">🔤 Перевод для BM25: "${niche} ${geo || ''}" → "${designQuery}"</div>`
+              : '';
             designMessages.innerHTML = `
               <div class="chat-msg chat-msg-assistant" style="padding:20px">
                 <div class="chat-msg-label">Design System (BM25)</div>
+                ${translationNote}
                 <div style="white-space:pre-wrap; font-size:12px; color:#8b949e">${designSystemRaw.replace(/</g, '&lt;')}</div>
               </div>`;
           }
