@@ -753,7 +753,6 @@
       color: #fff;
     }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
   <div class="container">
@@ -1021,13 +1020,10 @@
   </div>
 
   <script>
-    // === Supabase Init ===
-    const SUPABASE_URL = 'https://ugnsytownksbsizpjfra.supabase.co';
-    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVnbnN5dG93bmtzYnNpenBqZnJhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE3NjM1NjcsImV4cCI6MjA4NzMzOTU2N30.yugluBQY84Z9Wm-ebO1Bg1t802zgrv69YTGoyfFnhsA';
-    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    // === Projects: localStorage ===
     let currentProjectId = null;
+    const PROJECTS_KEY = 'nrg_projects';
 
-    // === Supabase: Projects CRUD ===
     const STATUS_LABELS = {
       in_progress: 'Генерация',
       generated: 'Сгенерирован',
@@ -1035,23 +1031,22 @@
       edited: 'Отредактирован'
     };
 
-    async function loadProjects() {
-      const { data, error } = await supabase
-        .from('projects')
-        .select('id, created_at, niche, geo, status')
-        .order('created_at', { ascending: false })
-        .limit(50);
+    function getProjects() {
+      try { return JSON.parse(localStorage.getItem(PROJECTS_KEY) || '[]'); }
+      catch { return []; }
+    }
 
-      if (error) {
-        console.error('Supabase loadProjects error:', error.message);
-        return;
-      }
+    function saveProjects(projects) {
+      localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+    }
 
+    function loadProjects() {
+      const projects = getProjects();
       const list = document.getElementById('projects-list');
       const count = document.getElementById('projects-count');
-      count.textContent = data.length > 0 ? `(${data.length})` : '';
+      count.textContent = projects.length > 0 ? `(${projects.length})` : '';
 
-      list.innerHTML = data.map(p => `
+      list.innerHTML = projects.map(p => `
         <div class="project-card" data-id="${p.id}">
           <div class="pc-niche">${escHtml(p.niche)}</div>
           <div class="pc-geo">${p.geo ? escHtml(p.geo) : 'Глобальный'}</div>
@@ -1083,7 +1078,7 @@
       if (isHidden) loadProjects();
     }
 
-    async function createProject() {
+    function createProject() {
       const niche = document.getElementById('niche').value.trim();
       const geo = document.getElementById('geo').value.trim() || null;
       const geoRequest = document.getElementById('geoRequest').value.trim() || null;
@@ -1091,7 +1086,6 @@
       const siteLang = document.getElementById('siteLang').value;
       const userCompanyData = document.getElementById('user-company-data')?.value.trim() || '';
 
-      // Parse injection fields from userCompanyData (first line = name, URL found in text)
       let injectionName = null, injectionUrl = null, injectionInfo = null;
       if (userCompanyData) {
         injectionInfo = userCompanyData;
@@ -1101,75 +1095,58 @@
         if (urlMatch) injectionUrl = urlMatch[0];
       }
 
-      const { data, error } = await supabase
-        .from('projects')
-        .insert({
-          niche,
-          geo,
-          geo_request: geoRequest,
-          query_lang: queryLang,
-          site_lang: siteLang,
-          injection_name: injectionName,
-          injection_url: injectionUrl,
-          injection_info: injectionInfo,
-          status: 'in_progress',
-          meta: {}
-        })
-        .select('id')
-        .single();
+      const id = crypto.randomUUID();
+      const project = {
+        id, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        niche, geo, geo_request: geoRequest, query_lang: queryLang, site_lang: siteLang,
+        injection_name: injectionName, injection_url: injectionUrl, injection_info: injectionInfo,
+        status: 'in_progress', html_content: null, seo_block: null, counters_block: null, meta: {}
+      };
 
-      if (error) {
-        console.error('Supabase createProject error:', error.message);
-        return null;
-      }
-
-      currentProjectId = data.id;
-      return data.id;
+      const projects = getProjects();
+      projects.unshift(project);
+      saveProjects(projects);
+      currentProjectId = id;
+      return id;
     }
 
-    async function updateProjectMeta(meta) {
+    function updateProjectMeta(meta) {
       if (!currentProjectId) return;
-      const { error } = await supabase
-        .from('projects')
-        .update({ meta, updated_at: new Date().toISOString() })
-        .eq('id', currentProjectId);
-      if (error) console.error('Supabase updateMeta error:', error.message);
+      const projects = getProjects();
+      const p = projects.find(p => p.id === currentProjectId);
+      if (!p) return;
+      p.meta = { ...p.meta, ...meta };
+      p.updated_at = new Date().toISOString();
+      saveProjects(projects);
     }
 
-    async function updateProjectStatus(status, htmlContent) {
+    function updateProjectStatus(status, htmlContent) {
       if (!currentProjectId) return;
-      const updateObj = { status, updated_at: new Date().toISOString() };
-      if (htmlContent !== undefined) updateObj.html_content = htmlContent;
-      const { error } = await supabase
-        .from('projects')
-        .update(updateObj)
-        .eq('id', currentProjectId);
-      if (error) console.error('Supabase updateStatus error:', error.message);
+      const projects = getProjects();
+      const p = projects.find(p => p.id === currentProjectId);
+      if (!p) return;
+      p.status = status;
+      p.updated_at = new Date().toISOString();
+      if (htmlContent !== undefined) p.html_content = htmlContent;
+      saveProjects(projects);
     }
 
-    async function updateProjectHtml(htmlContent, seoBlock, countersBlock) {
+    function updateProjectHtml(htmlContent, seoBlock, countersBlock) {
       if (!currentProjectId) return;
-      const updateObj = { html_content: htmlContent, updated_at: new Date().toISOString() };
-      if (seoBlock !== undefined) updateObj.seo_block = seoBlock;
-      if (countersBlock !== undefined) updateObj.counters_block = countersBlock;
-      const { error } = await supabase
-        .from('projects')
-        .update(updateObj)
-        .eq('id', currentProjectId);
-      if (error) console.error('Supabase updateHtml error:', error.message);
+      const projects = getProjects();
+      const p = projects.find(p => p.id === currentProjectId);
+      if (!p) return;
+      p.html_content = htmlContent;
+      p.updated_at = new Date().toISOString();
+      if (seoBlock !== undefined) p.seo_block = seoBlock;
+      if (countersBlock !== undefined) p.counters_block = countersBlock;
+      saveProjects(projects);
     }
 
-    async function openProject(id) {
-      const { data, error } = await supabase
-        .from('projects')
-        .select('*')
-        .eq('id', id)
-        .single();
-
-      if (error || !data) {
-        alert('Ошибка загрузки проекта');
-        return;
-      }
+    function openProject(id) {
+      const projects = getProjects();
+      const data = projects.find(p => p.id === id);
+      if (!data) { alert('Проект не найден'); return; }
 
       currentProjectId = data.id;
 
@@ -1188,9 +1165,6 @@
         if (data.meta.extractedCompanies) extractedCompanies = data.meta.extractedCompanies;
         if (data.meta.extractedRatings) extractedRatings = data.meta.extractedRatings;
         if (data.meta.compilerRawXml) compilerRawXml = data.meta.compilerRawXml;
-        if (data.meta.grokCriteriaRaw) {
-          // Restore conversations if available
-        }
       }
 
       // Restore HTML content
@@ -1230,8 +1204,6 @@
       }
 
       updatePreview();
-
-      // If in_progress and has currentStep, offer to continue
       if (data.status === 'in_progress' && data.meta?.currentStep) {
         showNotification(`Проект загружен. Остановлен на: ${data.meta.currentStep}`);
       } else {
@@ -1239,43 +1211,30 @@
       }
     }
 
-    async function duplicateProject(id) {
-      const { data, error } = await supabase
-        .from('projects')
-        .select('*')
-        .eq('id', id)
-        .single();
+    function duplicateProject(id) {
+      const projects = getProjects();
+      const orig = projects.find(p => p.id === id);
+      if (!orig) return;
 
-      if (error || !data) return;
+      const copy = JSON.parse(JSON.stringify(orig));
+      copy.id = crypto.randomUUID();
+      copy.created_at = new Date().toISOString();
+      copy.updated_at = new Date().toISOString();
+      copy.niche = copy.niche + ' (копия)';
+      copy.status = 'in_progress';
 
-      const { id: _id, created_at: _ca, updated_at: _ua, ...rest } = data;
-      rest.niche = rest.niche + ' (копия)';
-      rest.status = 'in_progress';
-
-      const { error: insertError } = await supabase
-        .from('projects')
-        .insert(rest);
-
-      if (insertError) {
-        alert('Ошибка дублирования');
-        return;
-      }
+      projects.unshift(copy);
+      saveProjects(projects);
       loadProjects();
       showNotification('Проект дублирован');
     }
 
-    async function deleteProject(id) {
+    function deleteProject(id) {
       if (!confirm('Удалить проект? Это действие необратимо.')) return;
 
-      const { error } = await supabase
-        .from('projects')
-        .delete()
-        .eq('id', id);
-
-      if (error) {
-        alert('Ошибка удаления');
-        return;
-      }
+      let projects = getProjects();
+      projects = projects.filter(p => p.id !== id);
+      saveProjects(projects);
 
       if (currentProjectId === id) currentProjectId = null;
       loadProjects();
@@ -2625,9 +2584,7 @@ ${userComment}
         apiKey: document.getElementById('apiKey').value.trim(),
         model: 'anthropic/claude-sonnet-4.5',
         siteLang: document.getElementById('siteLang')?.value || 'Русский',
-        projectId: currentProjectId,
-        supabaseUrl: SUPABASE_URL,
-        supabaseKey: SUPABASE_ANON_KEY
+        projectId: currentProjectId
       };
 
       // Add padding-top for toolbar
@@ -2762,26 +2719,15 @@ ${userComment}
         }
       });
 
-      // Save to Supabase
-      async function ewSave() {
+      // Save to localStorage via opener
+      function ewSave() {
         const clean = ewGetCleanHtml();
         canvasRawHtml = clean;
         if (window.opener && !window.opener.closed) {
           window.opener.canvasRawHtml = clean;
-        }
-
-        const cfg = win.__EDITOR_CONFIG__;
-        if (cfg.projectId && cfg.supabaseUrl && cfg.supabaseKey) {
-          const sb = window.supabase?.createClient?.(cfg.supabaseUrl, cfg.supabaseKey)
-                     || (window.opener?.supabase ? window.opener.supabase : null);
-          if (sb) {
-            // Use parent window's supabase client via opener
-          }
-          // Update via parent window function
-          if (window.opener && !window.opener.closed && window.opener.updateProjectHtml) {
-            window.opener.updateProjectHtml(clean);
-            window.opener.updateProjectStatus('edited', clean);
-          }
+          if (window.opener.updateProjectHtml) window.opener.updateProjectHtml(clean);
+          if (window.opener.updateProjectStatus) window.opener.updateProjectStatus('edited', clean);
+          if (window.opener.saveState) window.opener.saveState();
         }
 
         editorWindowDirty = false;
