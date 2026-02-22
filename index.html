@@ -1491,6 +1491,8 @@ ${compilerRawXml}
 ЗАЩИТНЫЕ МАРКЕРЫ:
 Блоки между <!-- PROTECTED:SEO:START/END --> и <!-- PROTECTED:COUNTERS:START/END --> в <head> НЕ ТРОГАЙ. Не удаляй маркеры, не меняй содержимое между ними, не перемещай их.
 
+SCHEMA.ORG: Не дублируй JSON-LD сущности. Question — только внутри FAQPage.mainEntity, не создавай отдельные JSON-LD блоки для Question. Person — один блок с @id, остальные ссылаются через @id.
+
 ФОРМАТ: Выведи ТОЛЬКО полный HTML-код. Без пояснений, без markdown, без тройных бэктиков. Чистый HTML начиная с <!DOCTYPE html>.`;
 
       try {
@@ -2739,6 +2741,11 @@ AI Summary: Факты, а не вода. Конкретные цифры.
 1. Микроразметка (Schema.org) — ОБЯЗАТЕЛЬНО
 
 Внедри JSON-LD для: ItemList, Organization (для каждой компании: name, url, aggregateRating), FAQPage, Person, Article.
+
+ПРАВИЛА Schema.org JSON-LD:
+- FAQPage: один блок <script type="application/ld+json"> с @type: "FAQPage" и mainEntity: массив Question. НЕ создавай отдельные JSON-LD блоки для каждого Question — они должны быть ТОЛЬКО внутри FAQPage.mainEntity.
+- Person: один блок. Если автор упоминается в Article и в Footer — используй @id и ссылайся на него, не дублируй.
+- Каждый JSON-LD блок — отдельный <script type="application/ld+json">. Но сущности НЕ дублируются между блоками.
 
 2. Структура и Код (Mobile-First)
 
