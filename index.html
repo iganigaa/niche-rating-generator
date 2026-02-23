@@ -1119,8 +1119,9 @@
     async function getProjects() {
       try {
         const resp = await fetch('/api/projects');
+        if (!resp.ok) { console.error('getProjects:', resp.status, await resp.text()); return []; }
         return await resp.json();
-      } catch { return []; }
+      } catch (e) { console.error('getProjects error:', e); return []; }
     }
 
     // BM25 + Design System moved to server-side bm25.js
@@ -1562,11 +1563,17 @@
             injection_name: injectionName, injection_info: injectionInfo,
           }),
         });
+        if (!resp.ok) {
+          const errText = await resp.text();
+          showNotification(`Ошибка создания проекта (${resp.status}): ${errText.substring(0, 200)}`, true);
+          return null;
+        }
         const project = await resp.json();
         currentProjectId = project.id;
         return project.id;
       } catch (err) {
         showNotification('Ошибка создания проекта: ' + err.message, true);
+        console.error('createProject error:', err, 'URL:', window.location.href);
         return null;
       }
     }
