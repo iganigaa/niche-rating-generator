@@ -89,6 +89,53 @@
       line-height: 1.4;
     }
 
+    /* === Style Selector === */
+    .style-selector { margin-top: 4px; }
+    .style-filter-bar { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+    .style-filter-btn {
+      padding: 4px 12px; border-radius: 14px; border: 1px solid #30363d;
+      background: transparent; color: #8b949e; font-size: 12px; cursor: pointer;
+      transition: all 0.15s;
+    }
+    .style-filter-btn:hover { border-color: #58a6ff; color: #58a6ff; }
+    .style-filter-btn.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+    .style-cards-track {
+      display: flex; gap: 10px; overflow-x: auto; padding: 4px 0 8px;
+      scrollbar-width: thin; scrollbar-color: #30363d transparent;
+    }
+    .style-cards-track::-webkit-scrollbar { height: 6px; }
+    .style-cards-track::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+    .style-card {
+      flex: 0 0 120px; height: 160px; border-radius: 8px; border: 2px solid #30363d;
+      background: #161b22; cursor: pointer; overflow: hidden; position: relative;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .style-card:hover { border-color: #58a6ff; }
+    .style-card.selected { border-color: #58a6ff; box-shadow: 0 0 0 2px rgba(88,166,255,0.3); }
+    .style-card-auto {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 8px; color: #8b949e; font-size: 12px;
+    }
+    .style-card-auto .auto-icon { font-size: 28px; opacity: 0.7; }
+    .style-card-preview {
+      width: 100%; height: 120px; overflow: hidden; pointer-events: none;
+    }
+    .style-card-label {
+      padding: 4px 6px; font-size: 9px; color: #c9d1d9; line-height: 1.2;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      background: rgba(13,17,23,0.85); position: absolute; bottom: 0; left: 0; right: 0;
+      text-align: center;
+    }
+    /* Mini-preview inside style card */
+    .sp-mini { transform: scale(0.22); transform-origin: top left; width: 545px; pointer-events: none; }
+    .sp-mini .sp-hero { padding: 16px 20px; border-radius: 6px 6px 0 0; min-height: 80px; display: flex; flex-direction: column; justify-content: center; }
+    .sp-mini .sp-hero h2 { font-size: 18px; margin: 0 0 4px; }
+    .sp-mini .sp-hero p { font-size: 11px; margin: 0; opacity: 0.85; }
+    .sp-mini .sp-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 10px; }
+    .sp-mini .sp-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .sp-mini .sp-bar { height: 6px; border-radius: 3px; flex: 1; }
+    .sp-mini .sp-score { font-size: 10px; font-weight: 600; min-width: 24px; text-align: right; }
+
     .prompt-preview {
       background: #161b22;
       border: 1px solid #30363d;
@@ -1002,6 +1049,16 @@
         <span class="field-hint">Если указать — компания станет #1 в итоговом рейтинге с бейджем «Выбор редакции»</span>
       </div>
 
+      <div class="input-group">
+        <label>Стиль дизайна</label>
+        <div class="style-selector">
+          <div class="style-filter-bar" id="styleFilterBar"></div>
+          <div class="style-cards-track" id="styleCardsTrack"></div>
+        </div>
+        <input type="hidden" id="designStyle" value="auto" />
+        <span class="field-hint">Выберите стиль или оставьте «Автоподбор» — система подберёт по нише</span>
+      </div>
+
       <div class="prompt-preview" id="preview">
         Составь список 30 <span class="highlight">...</span>
       </div>
@@ -1031,6 +1088,147 @@
     let currentProjectId = null;
     // Projects stored on server via /api/projects
 
+    // === DESIGN_STYLES: 58 styles from styles.json ===
+    const DESIGN_STYLES = [
+      {"id":1,"name":"Minimalism & Swiss Style","type":"General","keywords":"Clean, simple, spacious, functional, white space, high contrast, geometric, sans-serif, grid-based, essential","primaryColors":"Monochromatic, Black #000000, White #FFFFFF","secondaryColors":"Neutral (Beige #F5F1E8, Grey #808080, Taupe #B38B6D), Primary accent","effects":"Subtle hover (200-250ms), smooth transitions, sharp shadows if any, clear type hierarchy, fast loading","bestFor":"Enterprise apps, dashboards, documentation sites, SaaS platforms, professional tools","performance":"⚡ Excellent","accessibility":"✓ WCAG AAA"},
+      {"id":2,"name":"Neumorphism","type":"General","keywords":"Soft UI, embossed, debossed, convex, concave, light source, subtle depth, rounded (12-16px), monochromatic","primaryColors":"Light pastels: Soft Blue #C8E0F4, Soft Pink #F5E0E8, Soft Grey #E8E8E8","secondaryColors":"Tints/shades (±30%), gradient subtlety, color harmony","effects":"Soft box-shadow (multiple: -5px -5px 15px, 5px 5px 15px), smooth press (150ms), inner subtle shadow","bestFor":"Health/wellness apps, meditation platforms, fitness trackers, minimal interaction UIs","performance":"⚡ Good","accessibility":"⚠ Low contrast"},
+      {"id":3,"name":"Glassmorphism","type":"General","keywords":"Frosted glass, transparent, blurred background, layered, vibrant background, light source, depth, multi-layer","primaryColors":"Translucent white: rgba(255,255,255,0.1-0.3)","secondaryColors":"Vibrant: Electric Blue #0080FF, Neon Purple #8B00FF, Vivid Pink #FF1493, Teal #20B2AA","effects":"Backdrop blur (10-20px), subtle border (1px solid rgba white 0.2), light reflection, Z-depth","bestFor":"Modern SaaS, financial dashboards, high-end corporate, lifestyle apps","performance":"⚠ Good","accessibility":"⚠ Ensure 4.5:1"},
+      {"id":4,"name":"Brutalism","type":"General","keywords":"Raw, unpolished, stark, high contrast, plain text, default fonts, visible borders, asymmetric, anti-design","primaryColors":"Primary: Red #FF0000, Blue #0000FF, Yellow #FFFF00, Black #000000, White #FFFFFF","secondaryColors":"Limited: Neon Green #00FF00, Hot Pink #FF00FF, minimal secondary","effects":"No smooth transitions (instant), sharp corners (0px), bold typography (700+), visible grid, large blocks","bestFor":"Design portfolios, artistic projects, counter-culture brands, editorial/media sites","performance":"⚡ Excellent","accessibility":"✓ WCAG AAA"},
+      {"id":5,"name":"3D & Hyperrealism","type":"General","keywords":"Depth, realistic textures, 3D models, spatial navigation, tactile, skeuomorphic elements, rich detail, immersive","primaryColors":"Deep Navy #001F3F, Forest Green #228B22, Burgundy #800020, Gold #FFD700, Silver #C0C0C0","secondaryColors":"Complex gradients (5-10 stops), realistic lighting, shadow variations (20-40% darker)","effects":"WebGL/Three.js 3D, realistic shadows (layers), physics lighting, parallax (3-5 layers), smooth 3D (300-400ms)","bestFor":"Gaming, product showcase, immersive experiences, high-end e-commerce","performance":"❌ Poor","accessibility":"⚠ Not accessible"},
+      {"id":6,"name":"Vibrant & Block-based","type":"General","keywords":"Bold, energetic, playful, block layout, geometric shapes, high color contrast, duotone, modern, energetic","primaryColors":"Neon Green #39FF14, Electric Purple #BF00FF, Vivid Pink #FF1493, Bright Cyan #00FFFF, Sunburst #FFAA00","secondaryColors":"Complementary: Orange #FF7F00, Shocking Pink #FF006E, Lime #CCFF00, triadic schemes","effects":"Large sections (48px+ gaps), animated patterns, bold hover (color shift), scroll-snap, large type (32px+)","bestFor":"Startups, creative agencies, gaming, social media, youth-focused, entertainment","performance":"⚡ Good","accessibility":"◐ Ensure WCAG"},
+      {"id":7,"name":"Dark Mode (OLED)","type":"General","keywords":"Dark theme, low light, high contrast, deep black, midnight blue, eye-friendly, OLED, night mode","primaryColors":"Deep Black #000000, Dark Grey #121212, Midnight Blue #0A0E27","secondaryColors":"Vibrant accents: Neon Green #39FF14, Electric Blue #0080FF, Gold #FFD700, Plasma Purple #BF00FF","effects":"Minimal glow (text-shadow: 0 0 10px), dark-to-light transitions, low white emission, high readability","bestFor":"Night-mode apps, coding platforms, entertainment, eye-strain prevention, OLED devices","performance":"⚡ Excellent","accessibility":"✓ WCAG AAA"},
+      {"id":8,"name":"Accessible & Ethical","type":"General","keywords":"High contrast, large text (16px+), keyboard navigation, screen reader friendly, WCAG compliant, semantic","primaryColors":"WCAG AA/AAA (4.5:1 min), simple primary, clear secondary, high luminosity (7:1+)","secondaryColors":"Symbol-based colors (not color-only), supporting patterns, inclusive combinations","effects":"Clear focus rings (3-4px), ARIA labels, skip links, responsive design, reduced motion, 44x44px touch targets","bestFor":"Government, healthcare, education, inclusive products, legal compliance, public","performance":"⚡ Excellent","accessibility":"✓ WCAG AAA"},
+      {"id":9,"name":"Claymorphism","type":"General","keywords":"Soft 3D, chunky, playful, toy-like, bubbly, thick borders (3-4px), double shadows, rounded (16-24px)","primaryColors":"Pastel: Soft Peach #FDBCB4, Baby Blue #ADD8E6, Mint #98FF98, Lilac #E6E6FA","secondaryColors":"Soft gradients (pastel-to-pastel), light/dark variations (20-30%), gradient subtle","effects":"Inner+outer shadows (subtle, no hard lines), soft press (200ms ease-out), fluffy elements","bestFor":"Educational apps, children's apps, SaaS platforms, creative tools, fun-focused","performance":"⚡ Good","accessibility":"⚠ Ensure 4.5:1"},
+      {"id":10,"name":"Aurora UI","type":"General","keywords":"Vibrant gradients, smooth blend, Northern Lights effect, mesh gradient, luminous, atmospheric, abstract","primaryColors":"Complementary: Blue-Orange, Purple-Yellow, Electric Blue #0080FF, Magenta #FF1493, Cyan #00FFFF","secondaryColors":"Smooth transitions (Blue→Purple→Pink→Teal), iridescent effects, blend modes","effects":"Large flowing CSS/SVG gradients, subtle 8-12s animations, depth via color layering, smooth morph","bestFor":"Modern SaaS, creative agencies, branding, music platforms, lifestyle, premium products","performance":"⚠ Good","accessibility":"⚠ Text contrast"},
+      {"id":11,"name":"Retro-Futurism","type":"General","keywords":"Vintage sci-fi, 80s aesthetic, neon glow, geometric patterns, CRT scanlines, pixel art, cyberpunk, synthwave","primaryColors":"Neon Blue #0080FF, Hot Pink #FF006E, Cyan #00FFFF, Deep Black #1A1A2E, Purple #5D34D0","secondaryColors":"Metallic Silver #C0C0C0, Gold #FFD700, duotone, 80s Pink #FF10F0, neon accents","effects":"CRT scanlines (::before overlay), neon glow (text-shadow+box-shadow), glitch effects","bestFor":"Gaming, entertainment, music platforms, tech brands, artistic projects, cyberpunk","performance":"⚠ Moderate","accessibility":"⚠ High contrast/strain"},
+      {"id":12,"name":"Flat Design","type":"General","keywords":"2D, minimalist, bold colors, no shadows, clean lines, simple shapes, typography-focused, modern, icon-heavy","primaryColors":"Solid bright: Red, Orange, Blue, Green, limited palette (4-6 max)","secondaryColors":"Complementary colors, muted secondaries, high saturation, clean accents","effects":"No gradients/shadows, simple hover (color/opacity shift), fast loading, clean transitions (150-200ms)","bestFor":"Web apps, mobile apps, cross-platform, startup MVPs, SaaS, dashboards, corporate","performance":"⚡ Excellent","accessibility":"✓ WCAG AAA"},
+      {"id":13,"name":"Skeuomorphism","type":"General","keywords":"Realistic, texture, depth, 3D appearance, real-world metaphors, shadows, gradients, tactile, detailed","primaryColors":"Rich realistic: wood, leather, metal colors, detailed gradients (8-12 stops)","secondaryColors":"Realistic lighting gradients, shadow variations (30-50% darker), texture overlays","effects":"Realistic shadows (layers), depth (perspective), texture details (noise, grain), realistic animations","bestFor":"Legacy apps, gaming, immersive storytelling, premium products, luxury","performance":"❌ Poor","accessibility":"⚠ Textures reduce readability"},
+      {"id":14,"name":"Liquid Glass","type":"General","keywords":"Flowing glass, morphing, smooth transitions, fluid effects, translucent, animated blur, iridescent","primaryColors":"Vibrant iridescent (rainbow spectrum), translucent base with opacity shifts","secondaryColors":"Chromatic aberration (Red-Cyan), iridescent oil-spill, fluid gradient blends, holographic","effects":"Morphing elements (SVG/CSS), fluid animations (400-600ms curves), dynamic blur, color transitions","bestFor":"Premium SaaS, high-end e-commerce, creative platforms, branding experiences","performance":"⚠ Moderate-Poor","accessibility":"⚠ Text contrast"},
+      {"id":15,"name":"Motion-Driven","type":"General","keywords":"Animation-heavy, microinteractions, smooth transitions, scroll effects, parallax, entrance anim, page transitions","primaryColors":"Bold colors emphasize movement, high contrast animated, dynamic gradients","secondaryColors":"Transitional states, success (Green #22C55E), error (Red #EF4444), neutral feedback","effects":"Scroll anim (Intersection Observer), hover (300-400ms), entrance, parallax (3-5 layers)","bestFor":"Portfolio sites, storytelling platforms, interactive experiences, entertainment apps","performance":"⚠ Good","accessibility":"⚠ Prefers-reduced-motion"},
+      {"id":16,"name":"Micro-interactions","type":"General","keywords":"Small animations, gesture-based, tactile feedback, subtle animations, contextual interactions, responsive","primaryColors":"Subtle color shifts (10-20%), feedback: Green #22C55E, Red #EF4444, Amber #F59E0B","secondaryColors":"Accent feedback, neutral supporting, clear action indicators","effects":"Small hover (50-100ms), loading spinners, success/error state anim, gesture-triggered","bestFor":"Mobile apps, touchscreen UIs, productivity tools, consumer apps","performance":"⚡ Excellent","accessibility":"✓ Good"},
+      {"id":17,"name":"Inclusive Design","type":"General","keywords":"Accessible, color-blind friendly, high contrast, haptic feedback, voice interaction, screen reader, universal","primaryColors":"WCAG AAA (7:1+ contrast), avoid red-green only, symbol-based indicators","secondaryColors":"Supporting patterns (stripes, dots, hatch), symbols, non-color indicators","effects":"Haptic feedback (vibration), voice guidance, focus indicators (4px+ ring), motion options","bestFor":"Public services, education, healthcare, finance, government, inclusive consumer","performance":"⚡ Excellent","accessibility":"✓ WCAG AAA"},
+      {"id":18,"name":"Zero Interface","type":"General","keywords":"Minimal visible UI, voice-first, gesture-based, AI-driven, invisible controls, predictive, ambient","primaryColors":"Neutral backgrounds: Soft white #FAFAFA, light grey #F0F0F0, warm off-white #F5F1E8","secondaryColors":"Subtle feedback: light green, light red, minimal UI elements, soft accents","effects":"Voice recognition UI, gesture detection, AI predictions, progressive disclosure, smart suggestions","bestFor":"Voice assistants, AI platforms, smart home, contextual computing","performance":"⚡ Excellent","accessibility":"✓ Excellent"},
+      {"id":19,"name":"Soft UI Evolution","type":"General","keywords":"Evolved soft UI, better contrast, modern aesthetics, subtle depth, accessibility-focused, improved shadows","primaryColors":"Improved contrast pastels: Soft Blue #87CEEB, Soft Pink #FFB6C1, Soft Green #90EE90","secondaryColors":"Better combinations, accessible secondary, supporting with improved contrast","effects":"Improved shadows (softer than flat, clearer than neumorphism), modern (200-300ms), WCAG AA/AAA","bestFor":"Modern enterprise apps, SaaS platforms, health/wellness, modern business tools","performance":"⚡ Excellent","accessibility":"✓ WCAG AA+"},
+      {"id":20,"name":"Hero-Centric Design","type":"Landing Page","keywords":"Large hero section, compelling headline, high-contrast CTA, product showcase, value proposition","primaryColors":"Brand primary color, white/light backgrounds for contrast, accent color for CTA","secondaryColors":"Supporting colors for secondary CTAs, accent highlights, trust elements","effects":"Smooth scroll reveal, fade-in animations on hero, subtle background parallax, CTA glow/pulse","bestFor":"SaaS landing pages, product launches, service landing pages, B2B platforms","performance":"⚡ Good","accessibility":"✓ WCAG AA"},
+      {"id":21,"name":"Conversion-Optimized","type":"Landing Page","keywords":"Form-focused, minimalist design, single CTA focus, high contrast, urgency elements, trust signals","primaryColors":"Primary brand color, high-contrast white/light backgrounds, urgency colors","secondaryColors":"Secondary CTA color (muted), trust element colors, accent for key benefits","effects":"Hover states on CTA (color shift, slight scale), form field focus animations, success feedback","bestFor":"E-commerce product pages, free trial signups, lead generation, SaaS pricing pages","performance":"⚡ Excellent","accessibility":"✓ WCAG AA"},
+      {"id":22,"name":"Feature-Rich Showcase","type":"Landing Page","keywords":"Multiple feature sections, grid layout, benefit cards, visual feature demonstrations, interactive elements","primaryColors":"Primary brand, bright secondary colors for feature cards, contrasting accent for CTAs","secondaryColors":"Benefits (green), problems (red/orange), features (blue/purple), social proof (neutral)","effects":"Card hover effects (lift/scale), icon animations on scroll, feature toggle animations","bestFor":"Enterprise SaaS, software tools landing pages, platform services, B2B products","performance":"⚡ Good","accessibility":"✓ WCAG AA"},
+      {"id":23,"name":"Minimal & Direct","type":"Landing Page","keywords":"Minimal text, white space heavy, single column layout, direct messaging, clean typography, fast-loading","primaryColors":"Monochromatic primary, white background, single accent color for CTA","secondaryColors":"Minimal secondary colors, reserved for critical CTAs only, neutral supporting","effects":"Very subtle hover effects, minimal animations, fast page load, smooth scroll","bestFor":"Simple service landing pages, indie products, consulting, micro SaaS","performance":"⚡ Excellent","accessibility":"✓ WCAG AAA"},
+      {"id":24,"name":"Social Proof-Focused","type":"Landing Page","keywords":"Testimonials prominent, client logos displayed, case studies, reviews/ratings, credibility markers","primaryColors":"Primary brand, trust colors (blue), success/growth colors (green), neutral backgrounds","secondaryColors":"Testimonial highlight colors, logo grid backgrounds, badge/achievement colors","effects":"Testimonial carousel animations, logo grid fade-in, stat counter animations, review ratings","bestFor":"B2B SaaS, professional services, premium products, established brands","performance":"⚡ Good","accessibility":"✓ WCAG AA"},
+      {"id":25,"name":"Interactive Product Demo","type":"Landing Page","keywords":"Embedded product mockup/video, interactive elements, product walkthrough, step-by-step guides","primaryColors":"Primary brand, interface colors matching product, demo highlight colors","secondaryColors":"Product UI colors, tutorial step colors, hover state indicators","effects":"Product animation playback, step progression animations, hover reveal effects, smooth zoom","bestFor":"SaaS platforms, tool/software products, productivity apps, developer tools","performance":"⚠ Good (video/interactive)","accessibility":"✓ WCAG AA"},
+      {"id":26,"name":"Trust & Authority","type":"Landing Page","keywords":"Certificates/badges displayed, expert credentials, case studies with metrics, security badges","primaryColors":"Professional colors (blue/grey), trust colors, certification badge colors (gold/silver)","secondaryColors":"Certificate highlight colors, metric showcase colors, comparison highlight (success green)","effects":"Badge hover effects, metric pulse animations, certificate carousel, smooth stat reveal","bestFor":"Healthcare, financial services, enterprise software, premium/luxury products, legal","performance":"⚡ Excellent","accessibility":"✓ WCAG AAA"},
+      {"id":27,"name":"Storytelling-Driven","type":"Landing Page","keywords":"Narrative flow, visual story progression, section transitions, emotional messaging, journey visualization","primaryColors":"Brand primary, warm/emotional colors, varied accent colors per story section","secondaryColors":"Story section color coding, emotional state colors, transitional gradients","effects":"Section-to-section animations, scroll-triggered reveals, morphing transitions, parallax narrative","bestFor":"Brand/startup stories, mission-driven products, premium/lifestyle brands, educational","performance":"⚠ Moderate (animations)","accessibility":"✓ WCAG AA"},
+      {"id":28,"name":"Data-Dense Dashboard","type":"BI/Analytics","keywords":"Multiple charts/widgets, data tables, KPI cards, minimal padding, grid layout, space-efficient","primaryColors":"Neutral primary (#F5F5F5), data colors (blue/green/red), dark text #333333","secondaryColors":"Chart colors: success (green #22C55E), warning (amber #F59E0B), alert (red #EF4444)","effects":"Hover tooltips, chart zoom on click, row highlighting, smooth filter animations, data loading spinners","bestFor":"Business intelligence dashboards, financial analytics, enterprise reporting","performance":"⚡ Excellent","accessibility":"✓ WCAG AA"},
+      {"id":29,"name":"Heat Map & Heatmap Style","type":"BI/Analytics","keywords":"Color-coded grid/matrix, data intensity visualization, geographical heat maps, correlation matrices","primaryColors":"Gradient scale: Cool (blue #0080FF) to hot (red #FF0000), neutral middle (white/yellow)","secondaryColors":"Cool-to-hot gradients, divergent for positive/negative, monochromatic options","effects":"Color gradient transitions on data change, cell highlighting on hover, tooltip reveal","bestFor":"Geographical analysis, performance matrices, correlation analysis, user behavior heatmaps","performance":"⚡ Excellent","accessibility":"⚠ Colorblind considerations"},
+      {"id":30,"name":"Executive Dashboard","type":"BI/Analytics","keywords":"High-level KPIs, large key metrics, minimal detail, summary view, trend indicators, at-a-glance","primaryColors":"Brand colors, professional palette (blue/grey/white), accent for KPIs, red for alerts","secondaryColors":"KPI highlight: positive (green), negative (red), neutral (grey), trend arrow colors","effects":"KPI value animations (count-up), trend arrow animations, metric card hover lift, alert pulse","bestFor":"C-suite dashboards, business summary reports, decision-maker dashboards","performance":"⚡ Excellent","accessibility":"✓ WCAG AA"},
+      {"id":31,"name":"Real-Time Monitoring","type":"BI/Analytics","keywords":"Live data updates, status indicators, alert notifications, streaming data visualization","primaryColors":"Alert: critical (red #FF0000), warning (orange #FFA500), normal (green #22C55E), updating (blue)","secondaryColors":"Status indicator colors, chart line colors varying by metric, streaming highlights","effects":"Real-time chart animations, alert pulse/glow, status indicator blink, smooth data updates","bestFor":"System monitoring dashboards, DevOps, real-time analytics, stock market dashboards","performance":"⚡ Good (real-time load)","accessibility":"✓ WCAG AA"},
+      {"id":32,"name":"Drill-Down Analytics","type":"BI/Analytics","keywords":"Hierarchical data exploration, expandable sections, interactive drill-down paths, context preservation","primaryColors":"Primary brand, breadcrumb colors, drill-level indicator colors, hierarchy depth colors","secondaryColors":"Drill-down path indicators, level-specific colors, highlight for selected level","effects":"Drill-down expand animations, breadcrumb transitions, smooth detail reveal, data reload animation","bestFor":"Sales analytics, product analytics, funnel analysis, multi-dimensional exploration","performance":"⚡ Good","accessibility":"✓ WCAG AA"},
+      {"id":33,"name":"Comparative Analysis Dashboard","type":"BI/Analytics","keywords":"Side-by-side comparisons, period-over-period metrics, A/B test results, benchmarks","primaryColors":"Comparison: primary (blue), comparison (orange/purple), delta indicator (green/red)","secondaryColors":"Winning (green), losing (red), neutral comparison (grey), benchmark colors","effects":"Comparison bar animations, delta indicator animations, highlight on compare","bestFor":"Period-over-period reporting, A/B test dashboards, market comparison, competitive analysis","performance":"⚡ Excellent","accessibility":"✓ WCAG AA"},
+      {"id":34,"name":"Predictive Analytics","type":"BI/Analytics","keywords":"Forecast lines, confidence intervals, trend projections, scenario modeling, anomaly detection","primaryColors":"Forecast line color (distinct from actual), confidence interval shading, anomaly highlight (red)","secondaryColors":"High confidence (dark), low confidence (light), anomaly (red/orange), normal trend (green/blue)","effects":"Forecast line animation, confidence band fade-in, anomaly pulse alert, smoothing animations","bestFor":"Forecasting dashboards, anomaly detection, trend prediction, AI-powered analytics","performance":"⚠ Good (computation)","accessibility":"✓ WCAG AA"},
+      {"id":35,"name":"User Behavior Analytics","type":"BI/Analytics","keywords":"Funnel visualization, user flow diagrams, conversion tracking, engagement metrics, cohort analysis","primaryColors":"Funnel: high engagement (green), drop-off (red), conversion (blue), flow arrows (grey)","secondaryColors":"Stage completion (success), abandonment (warning), engagement levels (gradient), cohort colors","effects":"Funnel animation (fill-down), flow diagram animations, conversion pulse, engagement bar fill","bestFor":"Conversion funnel analysis, user journey tracking, engagement analytics, retention tracking","performance":"⚡ Good","accessibility":"✓ WCAG AA"},
+      {"id":36,"name":"Financial Dashboard","type":"BI/Analytics","keywords":"Revenue metrics, profit/loss visualization, budget tracking, financial ratios, portfolio performance","primaryColors":"Profit (green #22C55E), loss (red #EF4444), neutral (grey), trust (dark blue #003366)","secondaryColors":"Revenue (green), expenses (red), budget variance (orange/red), balance (grey)","effects":"Number animations (count-up), trend direction indicators, profit/loss color transitions","bestFor":"Financial reporting, accounting dashboards, portfolio tracking, budget monitoring","performance":"⚡ Excellent","accessibility":"✓ WCAG AAA"},
+      {"id":37,"name":"Sales Intelligence Dashboard","type":"BI/Analytics","keywords":"Deal pipeline, sales metrics, territory performance, leaderboard, win-loss analysis, quota tracking","primaryColors":"Won (green), lost (red), in-progress (blue), blocked (orange), quota met (gold)","secondaryColors":"Pipeline stage colors, rep performance colors, quota achievement, forecast accuracy colors","effects":"Deal movement animations, leaderboard ranking changes, gauge needle movements, status highlights","bestFor":"CRM dashboards, sales management, opportunity tracking, performance management","performance":"⚡ Good","accessibility":"✓ WCAG AA"},
+      {"id":38,"name":"Neubrutalism","type":"General","keywords":"Bold borders, black outlines, primary colors, thick shadows, no gradients, flat colors, 45° shadows, Gen Z","primaryColors":"#FFEB3B (Yellow), #FF5252 (Red), #2196F3 (Blue), #000000 (Black borders)","secondaryColors":"Limited accent colors, high contrast combinations, no gradients allowed","effects":"box-shadow: 4px 4px 0 #000, border: 3px solid #000, no gradients, sharp corners, bold typography","bestFor":"Gen Z brands, startups, creative agencies, Figma-style apps, Notion-style, tech blogs","performance":"⚡ Excellent","accessibility":"✓ WCAG AAA"},
+      {"id":39,"name":"Bento Box Grid","type":"General","keywords":"Modular cards, asymmetric grid, varied sizes, Apple-style, dashboard tiles, negative space, clean hierarchy","primaryColors":"Neutral base + brand accent, #FFFFFF, #F5F5F5, brand primary","secondaryColors":"Subtle gradients, shadow variations, accent highlights for interactive cards","effects":"grid-template with varied spans, rounded-xl (16px), subtle shadows, hover scale (1.02)","bestFor":"Dashboards, product pages, portfolios, Apple-style marketing, feature showcases, SaaS","performance":"⚡ Excellent","accessibility":"✓ WCAG AA"},
+      {"id":40,"name":"Y2K Aesthetic","type":"General","keywords":"Neon pink, chrome, metallic, bubblegum, iridescent, glossy, retro-futurism, 2000s","primaryColors":"#FF69B4 (Hot Pink), #00FFFF (Cyan), #C0C0C0 (Silver), #9400D3 (Purple)","secondaryColors":"Metallic gradients, glossy overlays, iridescent effects, chrome textures","effects":"linear-gradient metallic, glossy buttons, 3D chrome effects, glow animations, bubble shapes","bestFor":"Fashion brands, music platforms, Gen Z brands, nostalgia marketing, entertainment","performance":"⚠ Good","accessibility":"⚠ Check contrast"},
+      {"id":41,"name":"Cyberpunk UI","type":"General","keywords":"Neon, dark mode, terminal, HUD, sci-fi, glitch, dystopian, futuristic, matrix, tech noir","primaryColors":"#00FF00 (Matrix Green), #FF00FF (Magenta), #00FFFF (Cyan), #0D0D0D (Dark)","secondaryColors":"Neon gradients, scanline overlays, glitch colors, terminal green accents","effects":"Neon glow (text-shadow), glitch animations (skew/offset), scanlines, terminal fonts","bestFor":"Gaming platforms, tech products, crypto apps, sci-fi applications, developer tools","performance":"⚠ Moderate","accessibility":"⚠ Limited (dark+neon)"},
+      {"id":42,"name":"Organic Biophilic","type":"General","keywords":"Nature, organic shapes, green, sustainable, rounded, flowing, wellness, earthy, natural textures","primaryColors":"#228B22 (Forest Green), #8B4513 (Earth Brown), #87CEEB (Sky Blue), #F5F5DC (Beige)","secondaryColors":"Natural gradients, earth tones, sky blues, organic textures, wood/stone colors","effects":"Rounded corners (16-24px), organic curves, natural shadows, flowing SVG shapes","bestFor":"Wellness apps, sustainability brands, eco products, health apps, meditation","performance":"⚡ Excellent","accessibility":"✓ WCAG AA"},
+      {"id":43,"name":"AI-Native UI","type":"General","keywords":"Chatbot, conversational, voice, assistant, agentic, ambient, minimal chrome, streaming text","primaryColors":"Neutral + single accent, #6366F1 (AI Purple), #10B981 (Success), #F5F5F5","secondaryColors":"Status indicators, streaming highlights, context card colors, subtle accent variations","effects":"Typing indicators (3-dot pulse), streaming text animations, pulse, context cards, smooth reveals","bestFor":"AI products, chatbots, voice assistants, copilots, AI-powered tools","performance":"⚡ Excellent","accessibility":"✓ WCAG AA"},
+      {"id":44,"name":"Memphis Design","type":"General","keywords":"80s, geometric, playful, postmodern, shapes, patterns, squiggles, triangles, neon, bold","primaryColors":"#FF71CE (Hot Pink), #FFCE5C (Yellow), #86CCCA (Teal), #6A7BB4 (Blue Purple)","secondaryColors":"Complementary geometric colors, pattern fills, contrasting accent shapes","effects":"transform: rotate(), clip-path: polygon(), mix-blend-mode, repeating patterns, bold shapes","bestFor":"Creative agencies, music sites, youth brands, event promotion, artistic portfolios","performance":"⚡ Excellent","accessibility":"⚠ Check contrast"},
+      {"id":45,"name":"Vaporwave","type":"General","keywords":"Synthwave, retro-futuristic, 80s-90s, neon, glitch, nostalgic, sunset gradient, dreamy, aesthetic","primaryColors":"#FF71CE (Pink), #01CDFE (Cyan), #05FFA1 (Mint), #B967FF (Purple)","secondaryColors":"Sunset gradients, glitch overlays, VHS effects, neon accents, pastel variations","effects":"text-shadow glow, linear-gradient, filter: hue-rotate(), glitch animations, retro scan lines","bestFor":"Music platforms, gaming, creative portfolios, tech startups, entertainment","performance":"⚠ Moderate","accessibility":"⚠ Poor (motion)"},
+      {"id":46,"name":"Dimensional Layering","type":"General","keywords":"Depth, overlapping, z-index, layers, 3D, shadows, elevation, floating, cards, spatial hierarchy","primaryColors":"Neutral base (#FFFFFF, #F5F5F5, #E0E0E0) + brand accent for elevated elements","secondaryColors":"Shadow variations (sm/md/lg/xl), elevation colors, highlight colors for top layers","effects":"z-index stacking, box-shadow elevation (4 levels), transform: translateZ(), backdrop-filter","bestFor":"Dashboards, card layouts, modals, navigation, product showcases, SaaS interfaces","performance":"⚠ Good","accessibility":"⚠ Moderate (SR issues)"},
+      {"id":47,"name":"Exaggerated Minimalism","type":"General","keywords":"Bold minimalism, oversized typography, high contrast, negative space, loud minimal, statement design","primaryColors":"#000000 (Black), #FFFFFF (White), single vibrant accent only","secondaryColors":"Minimal - single accent color, no secondary colors, extreme restraint","effects":"font-size: clamp(3rem 10vw 12rem), font-weight: 900, letter-spacing: -0.05em, massive whitespace","bestFor":"Fashion, architecture, portfolios, agency landing pages, luxury brands, editorial","performance":"⚡ Excellent","accessibility":"✓ WCAG AA"},
+      {"id":48,"name":"Kinetic Typography","type":"General","keywords":"Motion text, animated type, moving letters, dynamic, typing effect, morphing, scroll-triggered text","primaryColors":"Flexible - high contrast, bold colors for emphasis, animation-friendly palette","secondaryColors":"Accent colors for emphasis, transition colors, gradient text fills","effects":"@keyframes text animation, typing effect, background-clip: text, GSAP ScrollTrigger","bestFor":"Hero sections, marketing sites, video platforms, storytelling, creative portfolios","performance":"⚠ Moderate","accessibility":"❌ Poor (motion)"},
+      {"id":49,"name":"Parallax Storytelling","type":"General","keywords":"Scroll-driven, narrative, layered scrolling, immersive, progressive disclosure, cinematic","primaryColors":"Story-dependent, often gradients and natural colors, section-specific palettes","secondaryColors":"Section transition colors, depth layer colors, narrative mood colors","effects":"transform: translateY(scroll), position: fixed/sticky, perspective: 1px, scroll-triggered","bestFor":"Brand storytelling, product launches, case studies, portfolios, annual reports","performance":"❌ Poor","accessibility":"❌ Poor (motion)"},
+      {"id":50,"name":"Swiss Modernism 2.0","type":"General","keywords":"Grid system, Helvetica, modular, asymmetric, international style, rational, clean, mathematical spacing","primaryColors":"#000000, #FFFFFF, #F5F5F5, single vibrant accent only","secondaryColors":"Minimal secondary, accent for emphasis only, no gradients","effects":"display: grid, 12-column grid, gap: 1rem, mathematical ratios, clear hierarchy","bestFor":"Corporate sites, architecture, editorial, SaaS, museums, professional services","performance":"⚡ Excellent","accessibility":"✓ WCAG AAA"},
+      {"id":51,"name":"HUD / Sci-Fi FUI","type":"General","keywords":"Futuristic, technical, wireframe, neon, data, transparency, sci-fi, interface","primaryColors":"Neon Cyan #00FFFF, Holographic Blue #0080FF, Alert Red #FF0000","secondaryColors":"Transparent Black, Grid Lines #333333","effects":"Glow effects, scanning animations, ticker text, blinking markers, fine line drawing","bestFor":"Sci-fi games, space tech, cybersecurity, immersive dashboards","performance":"⚠ Moderate (renders)","accessibility":"⚠ Poor (thin lines)"},
+      {"id":52,"name":"Pixel Art","type":"General","keywords":"Retro, 8-bit, 16-bit, gaming, blocky, nostalgic, pixelated, arcade","primaryColors":"Primary colors (NES Palette), brights, limited palette","secondaryColors":"Black outlines, shading via dithering or block colors","effects":"Frame-by-frame sprite animation, blinking cursor, instant transitions, marquee text","bestFor":"Indie games, retro tools, creative portfolios, nostalgia marketing, Web3/NFT","performance":"⚡ Excellent","accessibility":"✓ Good (if contrast ok)"},
+      {"id":53,"name":"Bento Grids","type":"General","keywords":"Apple-style, modular, cards, organized, clean, hierarchy, grid, rounded, soft","primaryColors":"Off-white #F5F5F7, Clean White #FFFFFF, Text #1D1D1F","secondaryColors":"Subtle accents, soft shadows, blurred backdrops","effects":"Hover scale (1.02), soft shadow expansion, smooth layout shifts, content reveal","bestFor":"Product features, dashboards, personal sites, marketing summaries, galleries","performance":"⚡ Excellent","accessibility":"✓ WCAG AA"},
+      {"id":54,"name":"Neubrutalism","type":"General","keywords":"Bold, ugly-cute, raw, high contrast, flat, hard shadows, distinct, playful, loud","primaryColors":"Pop Yellow #FFDE59, Bright Red #FF5757, Black #000000","secondaryColors":"Lavender #CBA6F7, Mint #76E0C2","effects":"Hard hover shifts (4px), marquee scrolling, jitter animations, bold borders","bestFor":"Design tools, creative agencies, Gen Z brands, personal blogs","performance":"⚡ Excellent","accessibility":"✓ WCAG AAA"},
+      {"id":55,"name":"Spatial UI (VisionOS)","type":"General","keywords":"Glass, depth, immersion, spatial, translucent, gaze, gesture, apple, vision-pro","primaryColors":"Frosted Glass #FFFFFF (15-30% opacity), System White","secondaryColors":"Vibrant system colors for active states, deep shadows for depth","effects":"Parallax depth, dynamic lighting response, gaze-hover effects, smooth scale on focus","bestFor":"Spatial computing apps, VR/AR interfaces, immersive media, futuristic dashboards","performance":"⚠ Moderate (blur cost)","accessibility":"⚠ Contrast risks"},
+      {"id":56,"name":"E-Ink / Paper","type":"General","keywords":"Paper-like, matte, high contrast, texture, reading, calm, slow tech, monochrome","primaryColors":"Off-White #FDFBF7, Paper White #F5F5F5, Ink Black #1A1A1A","secondaryColors":"Pencil Grey #4A4A4A, Highlighter Yellow #FFFF00 (accent)","effects":"No motion blur, distinct page turns, grain/noise texture, sharp transitions (no fade)","bestFor":"Reading apps, digital newspapers, minimal journals, distraction-free writing","performance":"⚡ Excellent","accessibility":"✓ WCAG AAA"},
+      {"id":57,"name":"Gen Z Chaos / Maximalism","type":"General","keywords":"Chaos, clutter, stickers, raw, collage, mixed media, loud, internet culture, ironic","primaryColors":"Clashing Brights: #FF00FF, #00FF00, #FFFF00, #0000FF","secondaryColors":"Gradients, rainbow, glitch, noise, heavily saturated mix","effects":"Marquee scrolls, jitter, sticker layering, GIF overload, random placement","bestFor":"Gen Z lifestyle brands, music artists, creative portfolios, viral marketing","performance":"⚠ Poor (heavy assets)","accessibility":"❌ Poor"},
+      {"id":58,"name":"Biomimetic / Organic 2.0","type":"General","keywords":"Nature-inspired, cellular, fluid, breathing, generative, algorithms, life-like","primaryColors":"Cellular Pink #FF9999, Chlorophyll Green #00FF41, Bioluminescent Blue","secondaryColors":"Deep Ocean #001E3C, Coral #FF7F50, Organic gradients","effects":"Breathing animations, fluid morphing, generative growth, physics-based movement","bestFor":"Sustainability tech, biotech, advanced health, meditation, generative art","performance":"⚠ Moderate","accessibility":"✓ Good"}
+    ];
+
+    // === Style Selector Logic ===
+    function parseColorsFromString(colorStr) {
+      const hexMatch = colorStr.match(/#[0-9A-Fa-f]{6}/g);
+      return hexMatch ? hexMatch.slice(0, 5) : ['#58a6ff','#1f6feb','#238636','#da3633','#f0883e'];
+    }
+
+    function renderStylePreviewCard(style) {
+      const colors = parseColorsFromString(style.primaryColors + ' ' + style.secondaryColors);
+      const bg = colors[0] || '#1a1f35';
+      const accent = colors[1] || '#58a6ff';
+      const text = isLightColor(bg) ? '#1a1a2e' : '#ffffff';
+      const barBg = isLightColor(bg) ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.1)';
+      return `<div class="sp-mini">
+        <div class="sp-hero" style="background:${bg};color:${text}">
+          <h2 style="color:${text}">${style.name}</h2>
+          <p style="color:${text}">${style.type}</p>
+        </div>
+        <div style="background:${isLightColor(bg) ? '#fff' : '#0d1117'}; padding:4px 0;">
+          ${[9.4, 8.7, 8.1].map((score, i) => {
+            const c = colors[i % colors.length] || accent;
+            return `<div class="sp-row">
+              <div class="sp-dot" style="background:${c}"></div>
+              <div class="sp-bar" style="background:${barBg}"><div style="width:${score*10}%;height:100%;background:${c};border-radius:3px;"></div></div>
+              <div class="sp-score" style="color:${text === '#ffffff' ? '#c9d1d9' : '#333'}">${score}</div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+    }
+
+    function isLightColor(hex) {
+      if (!hex || hex.charAt(0) !== '#') return false;
+      const r = parseInt(hex.substr(1,2),16), g = parseInt(hex.substr(3,2),16), b = parseInt(hex.substr(5,2),16);
+      return (r*299 + g*587 + b*114) / 1000 > 160;
+    }
+
+    let selectedDesignStyle = 'auto';
+
+    function initStyleSelector() {
+      const types = ['Все', 'General', 'Landing Page', 'BI/Analytics'];
+      const filterBar = document.getElementById('styleFilterBar');
+      const track = document.getElementById('styleCardsTrack');
+      if (!filterBar || !track) return;
+
+      filterBar.innerHTML = types.map(t =>
+        `<button class="style-filter-btn${t === 'Все' ? ' active' : ''}" onclick="filterStyles('${t}')">${t}</button>`
+      ).join('');
+
+      renderStyleCards('Все');
+    }
+
+    function filterStyles(type) {
+      document.querySelectorAll('.style-filter-btn').forEach(b => b.classList.toggle('active', b.textContent === type));
+      renderStyleCards(type);
+    }
+
+    function renderStyleCards(filterType) {
+      const track = document.getElementById('styleCardsTrack');
+      if (!track) return;
+      const filtered = filterType === 'Все' ? DESIGN_STYLES : DESIGN_STYLES.filter(s => s.type === filterType);
+
+      let html = `<div class="style-card${selectedDesignStyle === 'auto' ? ' selected' : ''}" onclick="selectDesignStyle('auto')" data-style="auto">
+        <div class="style-card-auto"><div class="auto-icon">🎯</div><div>Автоподбор</div></div>
+      </div>`;
+
+      html += filtered.map(s => `<div class="style-card${selectedDesignStyle === s.name ? ' selected' : ''}" onclick="selectDesignStyle('${s.name.replace(/'/g, "\\'")}')" data-style="${s.name}">
+        <div class="style-card-preview">${renderStylePreviewCard(s)}</div>
+        <div class="style-card-label">${s.name}</div>
+      </div>`).join('');
+
+      track.innerHTML = html;
+    }
+
+    function selectDesignStyle(name) {
+      selectedDesignStyle = name;
+      document.getElementById('designStyle').value = name;
+      document.querySelectorAll('.style-card').forEach(c => c.classList.toggle('selected', c.dataset.style === name));
+    }
+
     const STATUS_LABELS = {
       in_progress: 'Генерация',
       generated: 'Сгенерирован',
@@ -1057,6 +1255,7 @@
       } else if (hash === '#/generator') {
         document.getElementById('screen-generator').classList.remove('screen-hidden');
         document.getElementById('nav-link-generator').classList.add('active');
+        initStyleSelector();
       } else if (hash.startsWith('#/project/')) {
         const id = hash.split('/')[2];
         document.getElementById('screen-project').classList.remove('screen-hidden');
@@ -1545,6 +1744,7 @@
       const queryLang = document.getElementById('queryLang').value;
       const siteLang = document.getElementById('siteLang').value;
       const userCompanyData = document.getElementById('user-company-data')?.value.trim() || '';
+      const designStyle = document.getElementById('designStyle')?.value || 'auto';
 
       let injectionName = '', injectionInfo = '';
       if (userCompanyData) {
@@ -1561,6 +1761,7 @@
             niche, geo, geo_request: geoRequest,
             query_lang: queryLang, site_lang: siteLang,
             injection_name: injectionName, injection_info: injectionInfo,
+            design_style: designStyle,
           }),
         });
         if (!resp.ok) {

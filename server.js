@@ -101,6 +101,7 @@ app.post('/api/projects', (req, res) => {
     site_lang: req.body.site_lang || 'Русский',
     injection_name: req.body.injection_name || '',
     injection_info: req.body.injection_info || '',
+    design_style: req.body.design_style || 'auto',
     status: 'new',
     currentStep: null,
     pipelineStatus: 'idle',
@@ -137,7 +138,7 @@ app.put('/api/projects/:id', (req, res) => {
   if (!project) return res.status(404).json({ error: 'Not found' });
 
   const allowed = ['niche', 'geo', 'geo_request', 'query_lang', 'site_lang',
-    'injection_name', 'injection_info', 'status', 'currentStep', 'pipelineStatus',
+    'injection_name', 'injection_info', 'design_style', 'status', 'currentStep', 'pipelineStatus',
     'seo_block'];
   for (const key of allowed) {
     if (req.body[key] !== undefined) project[key] = req.body[key];

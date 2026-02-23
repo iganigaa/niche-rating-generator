@@ -481,36 +481,89 @@ ${criteriaBlocks}
     emit('step_done', { step: 'step_4', data: { grokAudienceRaw } });
   }
 
-  // === STEP DESIGN: BM25 design system ===
+  // === STEP DESIGN: BM25 design system or manual style selection ===
   if (startIdx <= 3) {
     emit('step_start', { step: 'step_design', label: 'Дизайн-система' });
 
-    let designQuery = niche + ' ' + (geo || '');
+    const designStyle = project.design_style || 'auto';
 
-    // Translate niche to English if Cyrillic
-    if (/[а-яёА-ЯЁ]/.test(designQuery)) {
-      try {
-        const translateResp = await callModel(
-          'google/gemini-2.0-flash-001',
-          [{ role: 'user', content: `Translate this business niche to English in 2-4 keywords. Only output keywords, nothing else: ${niche} ${geo || ''}` }],
-          apiKey
-        );
-        const translated = (translateResp.content || '').trim();
-        if (translated && !/error|sorry|не могу/i.test(translated)) {
-          console.log(`[step_design] Translated: "${niche} ${geo || ''}" → "${translated}"`);
-          designQuery = translated;
-        }
-      } catch (translateErr) {
-        console.warn('[step_design] Translation failed:', translateErr.message);
+    if (designStyle !== 'auto') {
+      // Manual style selection — use style directly from styles.json
+      const stylesData = JSON.parse(fs.readFileSync(path.join(__dirname, 'public', 'design-data', 'styles.json'), 'utf8'));
+      const chosen = stylesData.find(s => s['Style Category'] === designStyle);
+      if (chosen) {
+        designSystemRaw = `———————————————————————————
+ДИЗАЙН-СИСТЕМА (ВЫБРАНА ВРУЧНУЮ: ${chosen['Style Category']})
+———————————————————————————
+
+AESTHETIC DIRECTION: ${chosen['Style Category']} — ${chosen['Keywords'] || chosen['Type']}
+${chosen['Best For'] ? `Best For: ${chosen['Best For']}` : ''}
+${chosen['Performance'] ? `Performance: ${chosen['Performance']} | Accessibility: ${chosen['Accessibility']}` : ''}
+
+ЦВЕТА (определи через CSS custom properties :root):
+- Primary: ${chosen['Primary Colors']}
+- Secondary: ${chosen['Secondary Colors']}
+
+ЭФФЕКТЫ И АНИМАЦИИ:
+${chosen['Effects & Animation'] || '- Subtle hover transitions (150-300ms)'}
+
+АНТИ-ПАТТЕРНЫ (= ПРОВАЛ):
+- Дефолтные Tailwind/ShadCN layouts
+- Системные шрифты (Inter, Roboto, Arial, system-ui)
+- Если дизайн можно спутать с шаблоном — переделай
+
+ДОПОЛНИТЕЛЬНЫЕ ОБЯЗАТЕЛЬНЫЕ ПРАВИЛА:
+- ЗАПРЕЩЕНЫ: emojis как иконки — использовать SVG (Heroicons/Lucide)
+- cursor-pointer на всех кликабельных элементах
+- Hover transitions: 150-300ms
+- prefers-reduced-motion: reduce — отключать анимации
+- Контраст текста: минимум 4.5:1 (AA)
+- Focus-visible стили на интерактивных элементах
+- Responsive: 375px, 768px, 1024px, 1440px
+- Шрифты через Google Fonts CDN с display=swap + preconnect
+- Все цвета через CSS custom properties (:root)`;
+        console.log(`[step_design] Manual style: "${designStyle}"`);
+      } else {
+        console.warn(`[step_design] Style "${designStyle}" not found in styles.json, falling back to BM25`);
+        // Fall through to BM25 below
+      }
+
+      if (designSystemRaw) {
+        saveMeta({ currentStep: 'step_design', designSystemRaw });
+        updateProject({ currentStep: 'step_design' });
+        emit('step_done', { step: 'step_design', data: { designSystemRaw, designQuery: `Manual: ${designStyle}` } });
       }
     }
 
-    const ds = bm25.generateDesignSystem(designQuery, niche);
-    designSystemRaw = bm25.formatDesignSystemForPrompt(ds);
+    if (!designSystemRaw) {
+      // Auto mode — BM25 search
+      let designQuery = niche + ' ' + (geo || '');
 
-    saveMeta({ currentStep: 'step_design', designSystemRaw });
-    updateProject({ currentStep: 'step_design' });
-    emit('step_done', { step: 'step_design', data: { designSystemRaw, designQuery } });
+      // Translate niche to English if Cyrillic
+      if (/[а-яёА-ЯЁ]/.test(designQuery)) {
+        try {
+          const translateResp = await callModel(
+            'google/gemini-2.0-flash-001',
+            [{ role: 'user', content: `Translate this business niche to English in 2-4 keywords. Only output keywords, nothing else: ${niche} ${geo || ''}` }],
+            apiKey
+          );
+          const translated = (translateResp.content || '').trim();
+          if (translated && !/error|sorry|не могу/i.test(translated)) {
+            console.log(`[step_design] Translated: "${niche} ${geo || ''}" → "${translated}"`);
+            designQuery = translated;
+          }
+        } catch (translateErr) {
+          console.warn('[step_design] Translation failed:', translateErr.message);
+        }
+      }
+
+      const ds = bm25.generateDesignSystem(designQuery, niche);
+      designSystemRaw = bm25.formatDesignSystemForPrompt(ds);
+
+      saveMeta({ currentStep: 'step_design', designSystemRaw });
+      updateProject({ currentStep: 'step_design' });
+      emit('step_done', { step: 'step_design', data: { designSystemRaw, designQuery } });
+    }
   }
 
   // === STEP 5: Claude XML compiler ===
